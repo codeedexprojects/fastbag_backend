@@ -7,6 +7,7 @@ from firebase_admin import credentials, messaging
 from django.conf import settings
 import os
 import logging
+from users.models import CustomUser
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -125,14 +126,15 @@ def send_fcm_notification(fcm_token, title, body, data=None, notification_type='
 def send_order_placed_notification(user, order_id, final_amount):
     """Send notification to user when order is placed"""
     # Check if user has fcm_token attribute
-    if not hasattr(user, 'fcm_token'):
-        logger.warning(f"User {user} does not have fcm_token attribute")
+    users = CustomUser.objects.get(pk=user)
+    if not hasattr(users, 'fcm_token'):
+        logger.warning(f"User {users} does not have fcm_token attribute")
         return None
     
-    fcm_token = getattr(user, 'fcm_token', None)
+    fcm_token = getattr(users, 'fcm_token', None)
     
     if not fcm_token:
-        logger.warning(f"User {user} has no FCM token")
+        logger.warning(f"User {users} has no FCM token")
         return None
 
     return send_fcm_notification(
