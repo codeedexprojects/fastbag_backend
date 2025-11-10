@@ -1837,11 +1837,26 @@ class VendorCheckoutView(APIView):
                 )
 
                 # ✨ SEND FCM PUSH NOTIFICATIONS ✨
-                # Send to user
-                send_order_placed_notification(user, order_id, final_amount)
+                # These will fail gracefully if FCM is not set up or tokens are missing
+                try:
+                    # Send to user
+                    user_notification_result = send_order_placed_notification(user, order_id, final_amount)
+                    if user_notification_result:
+                        logger.info(f"Successfully sent order placed notification to user {user.id}")
+                    else:
+                        logger.warning(f"Failed to send order placed notification to user {user.id}")
+                except Exception as e:
+                    logger.error(f"Error sending user notification: {str(e)}")
                 
-                # Send to vendor
-                send_new_order_notification(vendor, order_id, user_name, final_amount)
+                try:
+                    # Send to vendor
+                    vendor_notification_result = send_new_order_notification(vendor, order_id, user_name, final_amount)
+                    if vendor_notification_result:
+                        logger.info(f"Successfully sent new order notification to vendor {vendor.id}")
+                    else:
+                        logger.warning(f"Failed to send new order notification to vendor {vendor.id}")
+                except Exception as e:
+                    logger.error(f"Error sending vendor notification: {str(e)}")
 
                 # Create order items
                 for item in cart_items:
@@ -1883,6 +1898,7 @@ class VendorCheckoutView(APIView):
                 # Handle online payment
                 if payment_method == 'online':
                     try:
+                        import razorpay
                         client = razorpay.Client(
                             auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET)
                         )
@@ -1901,6 +1917,7 @@ class VendorCheckoutView(APIView):
                             "currency": "INR"
                         })
                     except Exception as e:
+                        logger.error(f"Razorpay error: {str(e)}")
                         return Response(
                             {'error': f'Payment error: {str(e)}'}, 
                             status=status.HTTP_503_SERVICE_UNAVAILABLE
@@ -1909,8 +1926,10 @@ class VendorCheckoutView(APIView):
                 return Response(response_data, status=status.HTTP_201_CREATED)
 
         except (Vendor.DoesNotExist, Address.DoesNotExist, Cart.DoesNotExist) as e:
+            logger.error(f"Object not found: {str(e)}")
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
+            logger.error(f"Checkout failed: {str(e)}", exc_info=True)
             return Response(
                 {'error': f'Checkout failed: {str(e)}'}, 
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
@@ -1922,15 +1941,18 @@ class VendorCheckoutView(APIView):
         product_type = item.product_type
         product_name = f"Product {product_id}"
 
-        if product_type.lower() == 'clothing':
-            product = Clothing.objects.filter(id=product_id).first()
-            product_name = product.name if product else product_name
-        elif product_type.lower() == 'grocery':
-            product = GroceryProducts.objects.filter(id=product_id).first()
-            product_name = product.name if product else product_name
-        elif product_type.lower() == 'restaurent':
-            product = Dish.objects.filter(id=product_id).first()
-            product_name = product.name if product else product_name
+        try:
+            if product_type.lower() == 'clothing':
+                product = Clothing.objects.filter(id=product_id).first()
+                product_name = product.name if product else product_name
+            elif product_type.lower() == 'grocery':
+                product = GroceryProducts.objects.filter(id=product_id).first()
+                product_name = product.name if product else product_name
+            elif product_type.lower() == 'restaurent':
+                product = Dish.objects.filter(id=product_id).first()
+                product_name = product.name if product else product_name
+        except Exception as e:
+            logger.warning(f"Error fetching product name: {str(e)}")
 
         return product_name
 
@@ -1975,6 +1997,8 @@ class VendorCheckoutView(APIView):
 
     def handle_clothing_stock_reduction(self, item):
         """Handle stock reduction for clothing products"""
+        from django.db.models import F
+        
         updated = ClothingSize.objects.filter(
             color__clothing_id=item.product_id,
             color__color_name=item.color,
