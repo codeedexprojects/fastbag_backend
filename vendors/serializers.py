@@ -137,7 +137,7 @@ class VendorCreateSerializer(serializers.ModelSerializer):
         instance.is_fashion = False
 
         # Activate correct one based on store_type
-        if store_type and store_type.name.lower() == "restaurent":
+        if store_type and store_type.name.lower() == "restaurant":
             instance.is_restaurent = True
         elif store_type and store_type.name.lower() == "grocery":
             instance.is_Grocery = True
