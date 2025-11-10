@@ -1840,7 +1840,7 @@ class VendorCheckoutView(APIView):
                 # These will fail gracefully if FCM is not set up or tokens are missing
                 try:
                     # Send to user
-                    user_notification_result = send_order_placed_notification(user, order_id, final_amount)
+                    user_notification_result = send_order_placed_notification(user.id, order_id, final_amount)
                     if user_notification_result:
                         logger.info(f"Successfully sent order placed notification to user {user.id}")
                     else:
@@ -1850,7 +1850,7 @@ class VendorCheckoutView(APIView):
                 
                 try:
                     # Send to vendor
-                    vendor_notification_result = send_new_order_notification(vendor, order_id, user_name, final_amount)
+                    vendor_notification_result = send_new_order_notification(vendor.id, order_id, user_name, final_amount)
                     if vendor_notification_result:
                         logger.info(f"Successfully sent new order notification to vendor {vendor.id}")
                     else:

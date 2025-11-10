@@ -13,7 +13,6 @@ from vendors.models import Vendor
 # Set up logging
 logger = logging.getLogger(__name__)
 
-
 def initialize_firebase():
     """
     Initialize Firebase Admin SDK
@@ -148,7 +147,6 @@ def send_order_placed_notification(user, order_id, final_amount):
         },
         notification_type='order_placed'
     )
-
 
 def send_new_order_notification(vendor, order_id, customer_name, final_amount):
     """Send notification to vendor when new order is received"""
