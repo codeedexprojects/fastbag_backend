@@ -37,7 +37,6 @@ def initialize_firebase():
         logger.info("Firebase Admin SDK already initialized")
         return True
 
-
 def send_fcm_notification(fcm_token, title, body, data=None, notification_type='general'):
     """
     Generic function to send FCM notification
@@ -123,18 +122,17 @@ def send_fcm_notification(fcm_token, title, body, data=None, notification_type='
         logger.error(f"Failed to send FCM notification: {str(e)}", exc_info=True)
         return None
 
-
 def send_order_placed_notification(user, order_id, final_amount):
     """Send notification to user when order is placed"""
     # Check if user has fcm_token attribute
     if not hasattr(user, 'fcm_token'):
-        logger.warning(f"User {user.id} does not have fcm_token attribute")
+        logger.warning(f"User {user} does not have fcm_token attribute")
         return None
     
     fcm_token = getattr(user, 'fcm_token', None)
     
     if not fcm_token:
-        logger.warning(f"User {user.id} has no FCM token")
+        logger.warning(f"User {user} has no FCM token")
         return None
 
     return send_fcm_notification(
@@ -178,13 +176,13 @@ def send_new_order_notification(vendor, order_id, customer_name, final_amount):
 def send_order_status_notification(user, order_id, status, message=None):
     """Send notification when order status changes"""
     if not hasattr(user, 'fcm_token'):
-        logger.warning(f"User {user.id} does not have fcm_token attribute")
+        logger.warning(f"User {user} does not have fcm_token attribute")
         return None
     
     fcm_token = getattr(user, 'fcm_token', None)
     
     if not fcm_token:
-        logger.warning(f"User {user.id} has no FCM token")
+        logger.warning(f"User {user} has no FCM token")
         return None
 
     status_messages = {
@@ -212,13 +210,13 @@ def send_order_status_notification(user, order_id, status, message=None):
 def send_delivery_notification(user, order_id, delivery_pin):
     """Send notification with delivery PIN"""
     if not hasattr(user, 'fcm_token'):
-        logger.warning(f"User {user.id} does not have fcm_token attribute")
+        logger.warning(f"User {user} does not have fcm_token attribute")
         return None
     
     fcm_token = getattr(user, 'fcm_token', None)
     
     if not fcm_token:
-        logger.warning(f"User {user.id} has no FCM token")
+        logger.warning(f"User {user} has no FCM token")
         return None
 
     return send_fcm_notification(
@@ -236,13 +234,13 @@ def send_delivery_notification(user, order_id, delivery_pin):
 def send_payment_notification(user, order_id, payment_status, amount):
     """Send notification about payment status"""
     if not hasattr(user, 'fcm_token'):
-        logger.warning(f"User {user.id} does not have fcm_token attribute")
+        logger.warning(f"User {user} does not have fcm_token attribute")
         return None
     
     fcm_token = getattr(user, 'fcm_token', None)
     
     if not fcm_token:
-        logger.warning(f"User {user.id} has no FCM token")
+        logger.warning(f"User {user} has no FCM token")
         return None
 
     status_messages = {
