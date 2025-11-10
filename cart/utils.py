@@ -8,6 +8,7 @@ from django.conf import settings
 import os
 import logging
 from users.models import CustomUser
+from vendors.models import Vendor
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -151,15 +152,16 @@ def send_order_placed_notification(user, order_id, final_amount):
 
 def send_new_order_notification(vendor, order_id, customer_name, final_amount):
     """Send notification to vendor when new order is received"""
+    vendors = Vendor.objects.get(pk=vendor)
     # Check if vendor has fcm_token attribute
-    if not hasattr(vendor, 'fcm_token'):
-        logger.warning(f"Vendor {vendor.id} does not have fcm_token attribute")
+    if not hasattr(vendors, 'fcm_token'):
+        logger.warning(f"Vendor {vendors.id} does not have fcm_token attribute")
         return None
     
-    fcm_token = getattr(vendor, 'fcm_token', None)
+    fcm_token = getattr(vendors, 'fcm_token', None)
     
     if not fcm_token:
-        logger.warning(f"Vendor {vendor.id} has no FCM token")
+        logger.warning(f"Vendor {vendors.id} has no FCM token")
         return None
 
     return send_fcm_notification(
