@@ -62,7 +62,7 @@ class CartItemSerializer(serializers.ModelSerializer):
                 return {"selected_weight": obj.variant, "price_for_weight": product.get_price_for_weight(obj.variant)}
             elif obj.product_type == "Fashion":
                 return {"selected_size": obj.variant, "price_for_size": product.get_price_for_size(obj.variant)}
-            elif obj.product_type == "Restaurent":
+            elif obj.product_type == "Restaurant":
                 variant_details = next((v for v in product.variants if v["name"] == obj.variant), None)
                 return variant_details if variant_details else {"selected_variant": obj.variant}
 

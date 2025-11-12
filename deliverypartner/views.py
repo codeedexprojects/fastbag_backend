@@ -151,7 +151,33 @@ class DeliveryBoyLogoutView(APIView):
 
         return Response({"message": "Logout successful."}, status=status.HTTP_200_OK)
 
+class UpdateDeliveryBoyStatusView(APIView):
+    permission_classes = []
+    authentication_classes = []
 
+    def post(self, request):
+        delivery_boy_id = request.data.get("delivery_boy_id")
+        is_active = request.data.get("is_active")
+
+        # Validation checks
+        if delivery_boy_id is None:
+            return Response({"message": "Delivery boy ID is required."}, status=status.HTTP_400_BAD_REQUEST)
+        if is_active is None:
+            return Response({"message": "is_active field is required (true/false)."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            delivery_boy = DeliveryBoy.objects.get(id=delivery_boy_id)
+        except DeliveryBoy.DoesNotExist:
+            return Response({"message": "Delivery boy not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if isinstance(is_active, str):
+            is_active = is_active.lower() in ['true', '1', 'yes']
+
+        delivery_boy.is_active = is_active
+        delivery_boy.save(update_fields=["is_active"])
+
+        status_text = "activated" if is_active else "deactivated"
+        return Response({"message": f"Delivery boy successfully {status_text}."}, status=status.HTTP_200_OK)
 
 class DeliveryBoyDetailViewUser(generics.RetrieveUpdateDestroyAPIView):
     queryset = DeliveryBoy.objects.all()

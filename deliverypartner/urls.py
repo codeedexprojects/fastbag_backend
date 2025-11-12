@@ -12,7 +12,8 @@ urlpatterns =[
     path('request-otp/', RequestOTPView.as_view(), name='request_otp'),
     path('login-with-otp/', LoginWithOTPView.as_view(), name='login_with_otp'),
     path('delivery-boy/logout/', DeliveryBoyLogoutView.as_view(), name='delivery-boy-logout'),
-
+    #active
+    path('delivery-boy/update-status/', UpdateDeliveryBoyStatusView.as_view(), name='update-delivery-boy-status'),
     #assing order
 
     path('orderassign/', OrderAssignCreateView.as_view(), name='order-assign-create'),
