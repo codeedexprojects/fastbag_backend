@@ -1665,17 +1665,17 @@ class VendorProductsView(APIView):
         store_type = None
 
         if vendor.is_restaurent:
-            queryset = vendor.dishes.all()
+            queryset = Dish.objects.filter(vendor=vendor)
             serializer_class = DishCreateSerializer
             store_type = "restaurant"
 
         elif vendor.is_Grocery:
-            queryset = vendor.grocery.all()
+            queryset = GroceryProducts.objects.filter(vendor=vendor)
             serializer_class = GroceryProductSerializer
             store_type = "grocery"
 
         elif vendor.is_fashion:
-            queryset = vendor.clothing.all()
+            queryset = Clothing.objects.filter(vendor=vendor)
             serializer_class = ClothingSerializer
             store_type = "fashion"
 
