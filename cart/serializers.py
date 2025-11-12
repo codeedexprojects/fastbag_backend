@@ -33,7 +33,7 @@ class CartItemSerializer(serializers.ModelSerializer):
     def get_product_details(self, obj):
         product_model = {
             "Fashion": Clothing,
-            "Restaurent": Dish,
+            "Restaurant": Dish,
             "Grocery": GroceryProducts
         }.get(obj.product_type)
 
@@ -99,7 +99,7 @@ class CartItemSerializer(serializers.ModelSerializer):
                             "price_for_size": selected_size["price"]
                         }
 
-            elif obj.product_type == "Restaurent":
+            elif obj.product_type == "Restaurant":
                 variant_details = next((v for v in product.variants if v["name"] == obj.variant), None)
                 return variant_details if variant_details else {"selected_variant": obj.variant}
 
