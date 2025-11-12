@@ -1665,33 +1665,41 @@ class VendorProductsView(APIView):
         store_type = None
 
         if vendor.is_restaurent:
-            queryset = Dish.objects.filter(vendor=vendor)
+            queryset = Dish.objects.filter(
+                vendor=vendor
+            ).select_related('category', 'subcategory', 'vendor').prefetch_related('images')
             serializer_class = DishCreateSerializer
             store_type = "restaurant"
 
         elif vendor.is_Grocery:
-            queryset = GroceryProducts.objects.filter(vendor=vendor)
+            queryset = GroceryProducts.objects.filter(
+                vendor=vendor
+            ).select_related('category', 'subcategory', 'vendor').prefetch_related('images')
             serializer_class = GroceryProductSerializer
             store_type = "grocery"
 
         elif vendor.is_fashion:
-            queryset = Clothing.objects.filter(vendor=vendor)
+            queryset = Clothing.objects.filter(
+                vendor=vendor
+            ).select_related('category', 'subcategory', 'vendor').prefetch_related(
+                'clothcolors__sizes', 'images'
+            )
             serializer_class = ClothingSerializer
             store_type = "fashion"
 
         else:
             return Response({"error": "Vendor store type not defined"}, status=400)
+        
         vendor_data = VendorSerializer(vendor, context={"request": request}).data
-
 
         paginator = self.pagination_class()
         paginated_qs = paginator.paginate_queryset(queryset, request, view=self)
         serializer = serializer_class(paginated_qs, many=True, context={"request": request})
+        
         return paginator.get_paginated_response({
             "store_type": store_type,
             "products": serializer.data,
             "vendor": vendor_data,
-
         })
 
 class NearbyRestaurantsAPIView(generics.ListAPIView):
