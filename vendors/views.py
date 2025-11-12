@@ -1692,15 +1692,24 @@ class VendorProductsView(APIView):
         
         vendor_data = VendorSerializer(vendor, context={"request": request}).data
 
+        # Paginate the queryset
         paginator = self.pagination_class()
         paginated_qs = paginator.paginate_queryset(queryset, request, view=self)
+        
+        # Serialize the paginated data
         serializer = serializer_class(paginated_qs, many=True, context={"request": request})
         
-        return paginator.get_paginated_response({
+        # Create custom response with pagination metadata
+        response_data = paginator.get_paginated_response(serializer.data)
+        
+        # Modify the response to include vendor and store_type
+        response_data.data['results'] = {
             "store_type": store_type,
-            "products": serializer.data,
+            "products": response_data.data['results'],  # Move the serialized data to 'products'
             "vendor": vendor_data,
-        })
+        }
+        
+        return response_data
 
 class NearbyRestaurantsAPIView(generics.ListAPIView):
     serializer_class = VendorDetailSerializer
