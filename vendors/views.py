@@ -729,16 +729,16 @@ class VendorProductListView(APIView):
             status=status.HTTP_404_NOT_FOUND
         )
 
-class ProductCreateAPIView(APIView):
-    permission_classes= [AllowAny]
-    def post(self, request, *args, **kwargs):
-        serializer = ProductSerializer(data=request.data)
+# class ProductCreateAPIView(APIView):
+#     permission_classes= [AllowAny]
+#     def post(self, request, *args, **kwargs):
+#         serializer = ProductSerializer(data=request.data)
 
-        if serializer.is_valid():
-            product = serializer.save()
-            return Response({"message": "Product created successfully!", "product_id": product.id}, status=status.HTTP_201_CREATED)
+#         if serializer.is_valid():
+#             product = serializer.save()
+#             return Response({"message": "Product created successfully!", "product_id": product.id}, status=status.HTTP_201_CREATED)
 
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+#         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 class VendorProductsCountView(APIView):

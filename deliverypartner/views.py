@@ -130,7 +130,26 @@ class LoginWithOTPView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
+class DeliveryBoyLogoutView(APIView):
+    permission_classes = []
+    authentication_classes = []
 
+    def post(self, request):
+        delivery_boy_id = request.data.get("delivery_boy_id")
+
+        if not delivery_boy_id:
+            return Response({"message": "Delivery boy ID is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            delivery_boy = DeliveryBoy.objects.get(id=delivery_boy_id)
+        except DeliveryBoy.DoesNotExist:
+            return Response({"message": "Invalid delivery boy ID."}, status=status.HTTP_404_NOT_FOUND)
+
+        delivery_boy.is_active = False
+        delivery_boy.otp = None
+        delivery_boy.save()
+
+        return Response({"message": "Logout successful."}, status=status.HTTP_200_OK)
 
 
 
