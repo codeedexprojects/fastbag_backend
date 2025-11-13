@@ -240,125 +240,148 @@ class VendorListViewAdmin(generics.ListAPIView):
 
     @staticmethod
     def calculate_distance(lat1, lon1, lat2, lon2):
-        """
-        Calculate the distance between two points on Earth using Haversine formula
-        Returns distance in kilometers
-        """
-        # Earth's radius in kilometers
-        R = 6371.0
+        """Calculate distance using Haversine formula"""
+        R = 6371.0  # Earth's radius in km
         
-        # Convert coordinates to radians
         lat1_rad = radians(lat1)
         lon1_rad = radians(lon1)
         lat2_rad = radians(lat2)
         lon2_rad = radians(lon2)
         
-        # Differences
         dlat = lat2_rad - lat1_rad
         dlon = lon2_rad - lon1_rad
         
-        # Haversine formula
         a = sin(dlat / 2)**2 + cos(lat1_rad) * cos(lat2_rad) * sin(dlon / 2)**2
         c = 2 * atan2(sqrt(a), sqrt(1 - a))
         
-        distance = R * c
-        return distance
+        return R * c
 
     def get_queryset(self):
         queryset = super().get_queryset()
         
-        # Get location parameters from query params
         lat = self.request.query_params.get('latitude', None)
         lng = self.request.query_params.get('longitude', None)
-        radius = self.request.query_params.get('radius', None)  # in kilometers
+        radius = self.request.query_params.get('radius', None)
         
-        # If location parameters are provided, filter by radius
+        print(f"\n{'='*50}")
+        print(f"GET_QUERYSET - Params received:")
+        print(f"  latitude: {lat}")
+        print(f"  longitude: {lng}")
+        print(f"  radius: {radius}")
+        
         if lat and lng and radius:
             try:
                 user_lat = float(lat)
                 user_lng = float(lng)
                 radius_km = float(radius)
                 
-                # Get all vendors with valid coordinates
+                print(f"Filtering vendors within {radius_km}km of ({user_lat}, {user_lng})")
+                
                 vendors_with_location = queryset.filter(
                     latitude__isnull=False,
                     longitude__isnull=False
-                ).exclude(latitude=0, longitude=0).exclude(latitude='', longitude='')
+                ).exclude(latitude=0, longitude=0)
                 
-                # Filter vendors within radius
-                filtered_vendor_ids = []
+                print(f"Vendors with coordinates: {vendors_with_location.count()}")
+                
+                filtered_ids = []
                 for vendor in vendors_with_location:
                     try:
-                        vendor_lat = float(vendor.latitude)
-                        vendor_lng = float(vendor.longitude)
-                        
-                        distance = self.calculate_distance(
-                            user_lat, user_lng,
-                            vendor_lat, vendor_lng
-                        )
+                        v_lat = float(vendor.latitude)
+                        v_lng = float(vendor.longitude)
+                        distance = self.calculate_distance(user_lat, user_lng, v_lat, v_lng)
                         
                         if distance <= radius_km:
-                            filtered_vendor_ids.append(vendor.id)
-                    except (ValueError, TypeError):
-                        # Skip vendors with invalid coordinates
-                        continue
+                            filtered_ids.append(vendor.id)
+                            print(f"  ✓ {vendor.business_name}: {distance:.2f}km")
+                        else:
+                            print(f"  ✗ {vendor.business_name}: {distance:.2f}km (too far)")
+                    except (ValueError, TypeError) as e:
+                        print(f"  ✗ {vendor.business_name}: Invalid coordinates")
                 
-                queryset = queryset.filter(id__in=filtered_vendor_ids)
+                queryset = queryset.filter(id__in=filtered_ids)
+                print(f"Returning {queryset.count()} filtered vendors")
                 
             except (ValueError, TypeError) as e:
-                print(f"Location filter error: {e}")
-                # Invalid parameters, return empty queryset or all vendors
-                # return queryset  # Return all if you want, or:
-                pass
+                print(f"ERROR parsing params: {e}")
+        else:
+            print("No location filter - returning all vendors")
         
+        print(f"{'='*50}\n")
         return queryset
 
     def list(self, request, *args, **kwargs):
-        queryset = self.get_queryset()
-        serializer = self.get_serializer(queryset, many=True)
+        """CRITICAL: This method MUST add distance_km to response"""
         
-        # Add distance information if location params provided
+        # Get filtered queryset
+        queryset = self.get_queryset()
+        
+        # Serialize vendors
+        serializer = self.get_serializer(queryset, many=True)
+        data = list(serializer.data)  # Convert to list to modify
+        
+        # Get location params
         lat = request.query_params.get('latitude', None)
         lng = request.query_params.get('longitude', None)
         
-        data = serializer.data
+        print(f"\n{'='*50}")
+        print(f"LIST METHOD - Adding distance_km field")
+        print(f"  latitude param: {lat}")
+        print(f"  longitude param: {lng}")
+        print(f"  Total vendors to process: {len(data)}")
         
         if lat and lng:
             try:
                 user_lat = float(lat)
                 user_lng = float(lng)
                 
-                # Add distance to each vendor
+                print(f"  Processing distances for location: ({user_lat}, {user_lng})")
+                
+                success_count = 0
                 for vendor_data in data:
-                    vendor_lat = vendor_data.get('latitude')
-                    vendor_lng = vendor_data.get('longitude')
+                    v_lat = vendor_data.get('latitude')
+                    v_lng = vendor_data.get('longitude')
                     
-                    if vendor_lat and vendor_lng:
+                    if v_lat is not None and v_lng is not None:
                         try:
+                            # Convert to float and calculate
+                            v_lat_float = float(v_lat)
+                            v_lng_float = float(v_lng)
+                            
                             distance = self.calculate_distance(
                                 user_lat, user_lng,
-                                float(vendor_lat),
-                                float(vendor_lng)
+                                v_lat_float, v_lng_float
                             )
+                            
                             vendor_data['distance_km'] = round(distance, 2)
-                        except (ValueError, TypeError):
+                            success_count += 1
+                            print(f"  ✓ {vendor_data['business_name']}: {distance:.2f}km")
+                            
+                        except (ValueError, TypeError) as e:
                             vendor_data['distance_km'] = None
+                            print(f"  ✗ {vendor_data['business_name']}: Error - {e}")
                     else:
                         vendor_data['distance_km'] = None
+                        print(f"  ✗ {vendor_data['business_name']}: No coordinates")
                 
-                # Sort by distance (vendors with no distance go to end)
+                print(f"  SUCCESS: Added distance_km to {success_count}/{len(data)} vendors")
+                
+                # Sort by distance
                 data.sort(key=lambda x: x['distance_km'] if x['distance_km'] is not None else float('inf'))
+                print(f"  Sorted by distance")
                 
             except (ValueError, TypeError) as e:
-                print(f"Distance calculation error: {e}")
-                # Add None distance for all vendors if there's an error
+                print(f"  ERROR: {e}")
                 for vendor_data in data:
                     vendor_data['distance_km'] = None
         else:
-            # No location params, set distance_km to None for all
+            print(f"  No location params - setting all distance_km to None")
             for vendor_data in data:
                 vendor_data['distance_km'] = None
         
+        print(f"{'='*50}\n")
+        
+        # Return the modified data
         return Response(data)
 
 class VendorDetailView(generics.RetrieveUpdateDestroyAPIView):
