@@ -380,13 +380,30 @@ class OrderSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
 
         product_details = obj.product_details or []
-        product_ids = [item.get('product_id') for item in product_details if item.get('product_id')]
-
-        # Bulk fetch from all product types with proper ID conversion
-        # Note: Keep IDs as integers for the dictionary keys
-        clothings = {c.id: c for c in Clothing.objects.filter(id__in=product_ids).prefetch_related('images')}
-        groceries = {g.id: g for g in GroceryProducts.objects.filter(id__in=product_ids)}
-        dishes = {d.id: d for d in Dish.objects.filter(id__in=product_ids)}
+        
+        # Separate product IDs by type
+        clothing_ids = []
+        grocery_ids = []
+        dish_ids = []
+        
+        for item in product_details:
+            product_id = item.get('product_id')
+            product_type = item.get('product_type', '').lower()
+            
+            if product_id:
+                if product_type == 'grocery':
+                    grocery_ids.append(product_id)
+                elif product_type == 'restaurant':
+                    dish_ids.append(product_id)
+                else:
+                    # Default to clothing if no type specified or type is 'fashion'
+                    # This handles old orders without product_type
+                    clothing_ids.append(product_id)
+        
+        # Bulk fetch from each product type separately
+        clothings = {c.id: c for c in Clothing.objects.filter(id__in=clothing_ids).prefetch_related('images')}
+        groceries = {g.id: g for g in GroceryProducts.objects.filter(id__in=grocery_ids)}
+        dishes = {d.id: d for d in Dish.objects.filter(id__in=dish_ids)}
 
         for item in product_details:
             # Convert product_id to integer for lookup
@@ -398,24 +415,40 @@ class OrderSerializer(serializers.ModelSerializer):
 
             quantity = item.get('quantity', 0) or 0
             
-            # Look up product using integer ID and track which type it is
+            # Determine product type from item data
+            stored_product_type = item.get('product_type', '').lower()
+            
+            # Look up product based on stored product_type
             product = None
             product_source = None
             
             if product_id_int:
-                if product_id_int in clothings:
-                    product = clothings[product_id_int]
-                    product_source = 'clothing'
-                elif product_id_int in groceries:
-                    product = groceries[product_id_int]
+                if stored_product_type == 'grocery':
+                    product = groceries.get(product_id_int)
                     product_source = 'grocery'
-                elif product_id_int in dishes:
-                    product = dishes[product_id_int]
+                elif stored_product_type == 'restaurant':
+                    product = dishes.get(product_id_int)
                     product_source = 'dish'
+                else:
+                    # Default to clothing for backwards compatibility
+                    product = clothings.get(product_id_int)
+                    product_source = 'clothing'
+                    
+                # If product not found in expected type, try other types (for old orders)
+                if not product:
+                    if product_id_int in clothings:
+                        product = clothings[product_id_int]
+                        product_source = 'clothing'
+                    elif product_id_int in groceries:
+                        product = groceries[product_id_int]
+                        product_source = 'grocery'
+                    elif product_id_int in dishes:
+                        product = dishes[product_id_int]
+                        product_source = 'dish'
             
             product_name = getattr(product, 'name', '') or item.get('product_name', f'Product {product_id_str}')
 
-            # Initialize product_info with all necessary fields from OrderItemSerializer
+            # Initialize product_info with all necessary fields
             product_info = {
                 "id": item.get('id'),
                 "product_id": product_id_str,
@@ -449,7 +482,7 @@ class OrderSerializer(serializers.ModelSerializer):
                 if not product_info['subtotal']:
                     product_info['subtotal'] = quantity * product_info['price_per_unit']
 
-                # Product-specific attribute handling based on source
+                # Product-specific attribute handling based on actual product source
                 if product_source == 'clothing':
                     product_info['product_type'] = 'Fashion'
                     product_info['available_colors'] = product.colors or []
@@ -480,11 +513,14 @@ class OrderSerializer(serializers.ModelSerializer):
                 elif product_source == 'grocery':
                     product_info['product_type'] = 'Grocery'
                     
-                    # GroceryProducts typically don't have the 'images' relation
-                    # Add image handling if you have a separate image model for groceries
+                    # Handle grocery images if your GroceryProducts model has images
                     # For now, leaving empty or you can add default grocery image
-                    product_info['images'] = []
-                    product_info['product_image'] = ''
+                    if hasattr(product, 'image') and product.image and request:
+                        product_info['product_image'] = request.build_absolute_uri(product.image.url)
+                        product_info['images'] = [product_info['product_image']]
+                    else:
+                        product_info['images'] = []
+                        product_info['product_image'] = ''
 
                     weight = item.get('weight') or item.get('selected_weight')
                     if not weight:
@@ -503,10 +539,13 @@ class OrderSerializer(serializers.ModelSerializer):
                 elif product_source == 'dish':
                     product_info['product_type'] = 'Restaurant'
                     
-                    # Dishes typically don't have the 'images' relation
-                    # Add image handling if you have a separate image model for dishes
-                    product_info['images'] = []
-                    product_info['product_image'] = ''
+                    # Handle dish images if your Dish model has images
+                    if hasattr(product, 'image') and product.image and request:
+                        product_info['product_image'] = request.build_absolute_uri(product.image.url)
+                        product_info['images'] = [product_info['product_image']]
+                    else:
+                        product_info['images'] = []
+                        product_info['product_image'] = ''
 
                     product_info['available_variants'] = product.variants or []
                     product_info['selected_variant'] = item.get('variant') or item.get('selected_variant')
@@ -518,6 +557,15 @@ class OrderSerializer(serializers.ModelSerializer):
                     product_info.pop('selected_weight', None)
 
             else:
+                # If product not found, try to preserve stored product_type from order
+                if stored_product_type:
+                    if stored_product_type == 'grocery':
+                        product_info['product_type'] = 'Grocery'
+                    elif stored_product_type == 'restaurant':
+                        product_info['product_type'] = 'Restaurant'
+                    else:
+                        product_info['product_type'] = 'Fashion'
+                
                 product_info['error'] = 'Product not found'
 
             ordered_items.append(product_info)
