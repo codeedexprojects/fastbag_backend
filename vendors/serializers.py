@@ -486,19 +486,38 @@ class AppCarouselSerializer(serializers.ModelSerializer):
         fields = ['id','vendor','vendor_name','title','ads_image','created_at']
 
 
+from math import radians, sin, cos, sqrt, atan2
+
 class AppCarouselSerializerByLoc(serializers.ModelSerializer):
     distance = serializers.SerializerMethodField()
     vendor_name = serializers.SerializerMethodField()
-
+    location_display = serializers.SerializerMethodField()
+    
     class Meta:
         model = AppCarouselByLocation
-        fields = ['id', 'vendor', 'vendor_name','title', 'ads_image', 'latitude', 'longitude', 'created_at', 'distance']
+        fields = [
+            'id', 'vendor', 'vendor_name', 'title', 'ads_image', 
+            'location_type', 'place_name', 'latitude', 'longitude', 
+            'radius_km', 'created_at', 'distance', 'location_display', 'is_active'
+        ]
+        read_only_fields = ['distance', 'vendor_name', 'location_display']
 
     def get_distance(self, obj):
         return getattr(obj, 'distance', None)
     
     def get_vendor_name(self, obj):
-        return obj.vendor.owner_name
+        if obj.vendor:
+            return obj.vendor.owner_name
+        return "Platform Ad"  # or "No Vendor"
+    
+    def get_location_display(self, obj):
+        """Return a human-readable location string"""
+        if obj.location_type == 'district':
+            return f"{obj.place_name} (District)"
+        elif obj.location_type == 'radius':
+            return f"{obj.place_name} ({obj.radius_km} km radius)"
+        else:
+            return obj.place_name
 
 
 class VendorVideoSerializer(serializers.ModelSerializer):

@@ -185,13 +185,36 @@ class AppCarousel(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
 
+from django.db import models
+from django.contrib.gis.db.models import PointField
+from django.contrib.gis.geos import Point
+
 class AppCarouselByLocation(models.Model):
-    vendor = models.ForeignKey(Vendor, on_delete=models.CASCADE, related_name='carousel_imagebyloc')
+    LOCATION_TYPE_CHOICES = [
+        ('point', 'Specific Point'),
+        ('radius', 'Point with Radius'),
+        ('district', 'District/Area'),
+    ]
+    
+    vendor = models.ForeignKey(Vendor, on_delete=models.CASCADE, related_name='carousel_imagebyloc', null=True, blank=True)
     title = models.CharField(max_length=500, null=True, blank=True)
     ads_image = models.ImageField(upload_to="carousel_image", null=True, blank=True)
+    
+    # Location fields
+    location_type = models.CharField(max_length=20, choices=LOCATION_TYPE_CHOICES, default='point')
+    place_name = models.CharField(max_length=255, help_text="Name of the location/district")
     latitude = models.FloatField(null=True, blank=True)
     longitude = models.FloatField(null=True, blank=True)
+    radius_km = models.FloatField(default=0, help_text="Radius in kilometers (0 means exact location)")
+    
     created_at = models.DateTimeField(auto_now_add=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.title} - {self.place_name}"
 
 
 from django.core.files import File

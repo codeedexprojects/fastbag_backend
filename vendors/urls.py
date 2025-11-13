@@ -94,6 +94,10 @@ urlpatterns = [
     path("ads-carousel/<int:id>/", AdsCarouselDetailView.as_view(), name="ads-carousel-detail"),
     path('app-carousel/user/', AppCarouselListViewUser.as_view(), name='app-carousel-list-view'),
     path('app-carousel/<int:pk>/', AppCarouselDetailView.as_view(), name='app-carousel-detail'),
+    path('admin/carousels/', AdsCarouselListCreateView.as_view(), name='carousel-list-create'),
+    path('admin/carousels/<int:pk>/', AdsCarouselDetailView.as_view(), name='carousel-detail'),
+    path('carousels/by-location/', UserCarouselByLocationView.as_view(), name='carousel-by-location'),
+
     path('app-carousel/user-by-loc/', AdsCarouselListViewUserLoc.as_view(), name='app-carousel-list-view'),
     path('vendors/category/<int:category_id>/', VendorByCategoryLocationView.as_view(), name='vendors-by-category-location'),
 

@@ -1484,6 +1484,128 @@ class AppCarouselListViewUser(generics.ListAPIView):
         if vendor_id:
             return qs.filter(vendor_id=vendor_id)
         return qs
+    
+from rest_framework import generics, status
+from rest_framework.response import Response
+from rest_framework.permissions import IsAdminUser, AllowAny
+from django.db.models import Q, F
+from math import radians, sin, cos, sqrt, atan2
+
+class AdsCarouselListCreateView(generics.ListCreateAPIView):
+    permission_classes = [IsAdminUser]
+    serializer_class = AppCarouselSerializerByLoc
+    pagination_class = None
+
+    def get_queryset(self):
+        queryset = AppCarouselByLocation.objects.filter(is_active=True)
+        
+        # Filter by vendor
+        vendor_id = self.request.query_params.get('vendor_id')
+        if vendor_id:
+            try:
+                vendor_id = int(vendor_id)
+                queryset = queryset.filter(vendor_id=vendor_id)
+            except ValueError:
+                pass
+        
+        # Filter by location name
+        location_search = self.request.query_params.get('location')
+        if location_search:
+            queryset = queryset.filter(
+                Q(place_name__icontains=location_search)
+            )
+        
+        # Filter carousels without vendor (platform ads)
+        no_vendor = self.request.query_params.get('no_vendor')
+        if no_vendor and no_vendor.lower() == 'true':
+            queryset = queryset.filter(vendor__isnull=True)
+        
+        return queryset.select_related('vendor')
+
+    def create(self, request, *args, **kwargs):
+        # Vendor is now optional
+        data = request.data.copy()
+        
+        # Validate required fields
+        if not data.get('place_name'):
+            return Response(
+                {'error': 'place_name is required'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class AdsCarouselDetailView(generics.RetrieveUpdateDestroyAPIView):
+    permission_classes = [IsAdminUser]
+    serializer_class = AppCarouselSerializerByLoc
+    queryset = AppCarouselByLocation.objects.all()
+
+
+class UserCarouselByLocationView(generics.ListAPIView):
+    """
+    Get carousels for user based on their location
+    """
+    permission_classes = [AllowAny]
+    serializer_class = AppCarouselSerializerByLoc
+    pagination_class = None
+
+    def calculate_distance(self, lat1, lon1, lat2, lon2):
+        """Calculate distance between two points in kilometers using Haversine formula"""
+        R = 6371  # Earth's radius in kilometers
+
+        lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
+        dlat = lat2 - lat1
+        dlon = lon2 - lon1
+
+        a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
+        c = 2 * atan2(sqrt(a), sqrt(1-a))
+        distance = R * c
+
+        return distance
+
+    def get_queryset(self):
+        user_lat = self.request.query_params.get('latitude')
+        user_lon = self.request.query_params.get('longitude')
+
+        queryset = AppCarouselByLocation.objects.filter(is_active=True)
+
+        if user_lat and user_lon:
+            try:
+                user_lat = float(user_lat)
+                user_lon = float(user_lon)
+                
+                # Filter and calculate distances
+                relevant_carousels = []
+                for carousel in queryset:
+                    if carousel.latitude and carousel.longitude:
+                        distance = self.calculate_distance(
+                            user_lat, user_lon,
+                            carousel.latitude, carousel.longitude
+                        )
+                        
+                        # Check if user is within the carousel's radius
+                        if carousel.radius_km == 0 or distance <= carousel.radius_km:
+                            carousel.distance = round(distance, 2)
+                            relevant_carousels.append(carousel)
+                
+                # Sort by distance
+                relevant_carousels.sort(key=lambda x: x.distance)
+                return relevant_carousels
+                
+            except (ValueError, TypeError):
+                pass
+
+        return queryset
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.get_queryset()
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
 
 class AdsCarouselListCreateView(generics.ListCreateAPIView):
     permission_classes = [IsAdminUser]
