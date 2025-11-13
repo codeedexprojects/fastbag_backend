@@ -62,7 +62,7 @@ from geopy.geocoders import Nominatim
 from geopy.exc import GeocoderTimedOut, GeocoderServiceError
 
 class OrderAssign(models.Model):
-    order = models.ForeignKey('Order', on_delete=models.CASCADE, related_name='assigned_orders')
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='assigned_orders')
     delivery_boy = models.ForeignKey('DeliveryBoy', on_delete=models.CASCADE, related_name='assigned_orders')
     assigned_at = models.DateTimeField(default=timezone.now)
     status = models.CharField(max_length=50, default='ASSIGNED', choices=[
