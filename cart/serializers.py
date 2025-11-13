@@ -398,10 +398,20 @@ class OrderSerializer(serializers.ModelSerializer):
 
             quantity = item.get('quantity', 0) or 0
             
-            # Look up product using integer ID
+            # Look up product using integer ID and track which type it is
             product = None
+            product_source = None
+            
             if product_id_int:
-                product = clothings.get(product_id_int) or groceries.get(product_id_int) or dishes.get(product_id_int)
+                if product_id_int in clothings:
+                    product = clothings[product_id_int]
+                    product_source = 'clothing'
+                elif product_id_int in groceries:
+                    product = groceries[product_id_int]
+                    product_source = 'grocery'
+                elif product_id_int in dishes:
+                    product = dishes[product_id_int]
+                    product_source = 'dish'
             
             product_name = getattr(product, 'name', '') or item.get('product_name', f'Product {product_id_str}')
 
@@ -439,8 +449,8 @@ class OrderSerializer(serializers.ModelSerializer):
                 if not product_info['subtotal']:
                     product_info['subtotal'] = quantity * product_info['price_per_unit']
 
-                # Product-specific attribute handling - IMPORTANT: Check type FIRST
-                if isinstance(product, Clothing):
+                # Product-specific attribute handling based on source
+                if product_source == 'clothing':
                     product_info['product_type'] = 'Fashion'
                     product_info['available_colors'] = product.colors or []
 
@@ -467,7 +477,7 @@ class OrderSerializer(serializers.ModelSerializer):
                     product_info.pop('selected_variant', None)
                     product_info.pop('available_variants', None)
 
-                elif isinstance(product, GroceryProducts):
+                elif product_source == 'grocery':
                     product_info['product_type'] = 'Grocery'
                     
                     # GroceryProducts typically don't have the 'images' relation
@@ -490,7 +500,7 @@ class OrderSerializer(serializers.ModelSerializer):
                     product_info.pop('selected_variant', None)
                     product_info.pop('available_variants', None)
 
-                elif isinstance(product, Dish):
+                elif product_source == 'dish':
                     product_info['product_type'] = 'Restaurant'
                     
                     # Dishes typically don't have the 'images' relation
