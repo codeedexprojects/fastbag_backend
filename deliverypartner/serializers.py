@@ -210,60 +210,91 @@ class DeliveryNotificationSerializer(serializers.ModelSerializer):
 
 
 
-
-
 class AcceptedOrderSerializer(serializers.ModelSerializer):
-    order_id = serializers.CharField(source='order.order_id')
-    delivery_boy_name = serializers.CharField(source='accepted_by.name', read_only=True)
-    delivery_boy_number = serializers.IntegerField(source='accepted_by.mobile_number',read_only=True)
-    vendor_details = serializers.SerializerMethodField()
+    order_id = serializers.CharField(source='order.order_id', read_only=True)
     user_details = serializers.SerializerMethodField()
-
+    vendor_details = serializers.SerializerMethodField()
+    assignment_status = serializers.SerializerMethodField()
+    
     class Meta:
         model = OrderAssign
         fields = [
-            'id', 'order_id', 'delivery_boy_name','delivery_boy_number', 'status', 'assigned_at',
-            'vendor_details', 'user_details','is_accepted','is_rejected'
+            'id', 'order_id', 'assigned_at', 'status', 'is_accepted', 
+            'is_rejected', 'user_details', 'vendor_details', 
+            'assignment_status', 'delivery_charge'
         ]
-
-    def get_vendor_details(self, obj):
-        if obj.order and obj.order.checkout:
-            items = obj.order.checkout.items.all()
-            if items.exists():
-                vendor = items.first().vendor
-                if vendor:
-                    return {
-                        "name": vendor.business_name,
-                        "address": vendor.address,
-                        "landmark": vendor.business_landmark,
-                        "city": vendor.city,
-                        "state": vendor.state,
-                        "pincode": vendor.pincode,
-                        "latitude": vendor.latitude,
-                        "longitude": vendor.longitude
-                    }
-        return None
-
+    
+    def get_assignment_status(self, obj):
+        """Return human-readable assignment status"""
+        if obj.is_accepted:
+            return "Accepted"
+        elif obj.is_rejected:
+            return "Rejected"
+        return "Pending"
+    
     def get_user_details(self, obj):
-        user = obj.order.user if obj.order else None
-        if user:
-            primary_address = user.addresses.filter(is_primary=True).first()
-            return {
-                "name": user.name,
-                "mobile_number": user.mobile_number,
-                "email": user.email,
-                "address": {
-                    "address_line1": primary_address.address_line1 if primary_address else None,
-                    "address_line2": primary_address.address_line2 if primary_address else None,
-                    "city": primary_address.city if primary_address else None,
-                    "state": primary_address.state if primary_address else None,
-                    "country": primary_address.country if primary_address else None,
-                    "pincode": primary_address.pincode if primary_address else None,
-                    "latitude":primary_address.latitude if primary_address else None,
-                    "longitude":primary_address.longitude if primary_address else None
-                }
+        """Get user details with location name instead of lat/lon"""
+        user = obj.order.user
+        
+        # Get address from checkout
+        try:
+            checkout = obj.order.checkout
+            address = checkout.selected_address if hasattr(checkout, 'selected_address') else None
+        except Exception:
+            address = None
+        
+        address_data = None
+        if address:
+            # Get location name from lat/lon
+            location_name = None
+            if hasattr(address, 'latitude') and hasattr(address, 'longitude'):
+                if address.latitude and address.longitude:
+                    location_name = obj.get_location_name(address.latitude, address.longitude)
+            
+            address_data = {
+                'address_line1': getattr(address, 'address_line1', ''),
+                'address_line2': getattr(address, 'address_line2', ''),
+                'city': getattr(address, 'city', ''),
+                'state': getattr(address, 'state', ''),
+                'country': getattr(address, 'country', ''),
+                'pincode': getattr(address, 'pincode', ''),
+                'location_name': location_name or f"{getattr(address, 'city', '')}, {getattr(address, 'state', '')}",
             }
-        return None
+        
+        return {
+            'name': user.get_full_name() or user.username,
+            'email': user.email,
+            'address': address_data
+        }
+    
+    def get_vendor_details(self, obj):
+        """Get vendor details with location name instead of lat/lon"""
+        # Get vendor from first order item
+        try:
+            order_items = obj.order.order_items.all()
+            if not order_items.exists():
+                return None
+            
+            vendor = order_items.first().vendor
+            
+            # Get location name from lat/lon
+            location_name = None
+            if hasattr(vendor, 'latitude') and hasattr(vendor, 'longitude'):
+                if vendor.latitude and vendor.longitude:
+                    location_name = obj.get_location_name(vendor.latitude, vendor.longitude)
+            
+            return {
+                'name': vendor.name,
+                'address': getattr(vendor, 'address', ''),
+                'landmark': getattr(vendor, 'landmark', ''),
+                'city': getattr(vendor, 'city', ''),
+                'state': getattr(vendor, 'state', ''),
+                'pincode': getattr(vendor, 'pincode', ''),
+                'location_name': location_name or f"{getattr(vendor, 'city', '')}, {getattr(vendor, 'state', '')}",
+            }
+        except Exception as e:
+            print(f"Error getting vendor details: {e}")
+            return None
 
 class OrderAssignStatusUpdateSerializer(serializers.ModelSerializer):
     class Meta:

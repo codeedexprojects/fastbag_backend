@@ -15,6 +15,7 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 from vendors.authentication import VendorJWTAuthentication
+from rest_framework.pagination import PageNumberPagination
 
 
 class DeliveryBoyListCreateView(generics.ListCreateAPIView):
@@ -329,12 +330,48 @@ class AcceptOrderView(generics.UpdateAPIView):
             "status": order_assign.status
         }, status=status.HTTP_200_OK)
 
-class AcceptedOrdersListView(generics.ListAPIView):
+class StandardResultsSetPagination(PageNumberPagination):
+    page_size = 10
+    page_size_query_param = 'page_size'
+    max_page_size = 100
+
+
+class DeliveryBoyOrdersListView(generics.ListAPIView):
+    """
+    API view to retrieve all orders (accepted and rejected) for a specific delivery boy
+    """
     serializer_class = AcceptedOrderSerializer
     permission_classes = [IsAdminUser]
+    pagination_class = StandardResultsSetPagination
 
     def get_queryset(self):
-        return OrderAssign.objects.filter(is_accepted=True).select_related('order', 'accepted_by')
+        delivery_boy_id = self.kwargs.get('pk')
+        
+        # Return all assigned orders for this delivery boy
+        queryset = OrderAssign.objects.filter(
+            delivery_boy_id=delivery_boy_id
+        ).select_related(
+            'order',
+            'order__user',
+            'order__checkout',
+            'delivery_boy',
+            'accepted_by'
+        ).prefetch_related(
+            'order__order_items',
+            'order__order_items__vendor'
+        ).order_by('-assigned_at')
+        
+        # Optional filtering by status
+        status_filter = self.request.query_params.get('status', None)
+        if status_filter:
+            if status_filter.lower() == 'accepted':
+                queryset = queryset.filter(is_accepted=True, is_rejected=False)
+            elif status_filter.lower() == 'rejected':
+                queryset = queryset.filter(is_rejected=True)
+            elif status_filter.lower() == 'pending':
+                queryset = queryset.filter(is_accepted=False, is_rejected=False)
+        
+        return queryset
 
 class AcceptedOrdersByVendorListView(generics.ListAPIView):
     serializer_class = AcceptedOrderSerializer

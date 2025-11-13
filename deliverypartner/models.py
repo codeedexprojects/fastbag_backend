@@ -53,27 +53,125 @@ class DeliveryBoy(models.Model):
             return True
         return False
 
+# models.py - Add this to your OrderAssign model
+
+from django.db import models
+from django.utils import timezone
+from django.core.cache import cache
+from geopy.geocoders import Nominatim
+from geopy.exc import GeocoderTimedOut, GeocoderServiceError
+
 class OrderAssign(models.Model):
-    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='assigned_orders')
-    delivery_boy = models.ForeignKey(DeliveryBoy, on_delete=models.CASCADE, related_name='assigned_orders')
+    order = models.ForeignKey('Order', on_delete=models.CASCADE, related_name='assigned_orders')
+    delivery_boy = models.ForeignKey('DeliveryBoy', on_delete=models.CASCADE, related_name='assigned_orders')
     assigned_at = models.DateTimeField(default=timezone.now)
     status = models.CharField(max_length=50, default='ASSIGNED', choices=[
         ('ASSIGNED', 'Assigned'),
-        ('ACCEPTED','Accepted'),
+        ('ACCEPTED', 'Accepted'),
         ('PICKED', 'Picked'),
         ('ON_THE_WAY', 'On the way'),
         ('DELIVERED', 'Delivered'),
-        ('RETURNED','Returned'),
-        ('REJECTED','Rejected')
+        ('RETURNED', 'Returned'),
+        ('REJECTED', 'Rejected')
     ])
     is_rejected = models.BooleanField(default=False)
     is_accepted = models.BooleanField(default=False)
-    accepted_by = models.ForeignKey(DeliveryBoy, related_name='accepted_orders', null=True, blank=True, on_delete=models.SET_NULL)
+    accepted_by = models.ForeignKey(
+        'DeliveryBoy', 
+        related_name='accepted_orders', 
+        null=True, 
+        blank=True, 
+        on_delete=models.SET_NULL
+    )
+    delivery_charge = models.DecimalField(
+        max_digits=10, 
+        decimal_places=2, 
+        default=0.00,
+        help_text="Delivery charge for this order"
+    )
 
-
+    class Meta:
+        ordering = ['-assigned_at']
+        verbose_name = 'Order Assignment'
+        verbose_name_plural = 'Order Assignments'
 
     def __str__(self):
-        return f"Order {self.order.id} assigned to {self.delivery_boy.name}"
+        return f"Order {self.order.order_id} assigned to {self.delivery_boy.name}"
+
+    def get_location_name(self, latitude, longitude):
+        """
+        Convert latitude and longitude to a human-readable location name
+        Uses caching to avoid repeated API calls for the same coordinates
+        """
+        if not latitude or not longitude:
+            return None
+        
+        # Create cache key from coordinates (rounded to 4 decimal places for grouping nearby locations)
+        lat_rounded = round(float(latitude), 4)
+        lon_rounded = round(float(longitude), 4)
+        cache_key = f"location_{lat_rounded}_{lon_rounded}"
+        
+        # Check if location name is already cached
+        cached_location = cache.get(cache_key)
+        if cached_location:
+            return cached_location
+        
+        try:
+            # Initialize geocoder with user agent
+            geolocator = Nominatim(user_agent="fastbag_app", timeout=10)
+            
+            # Reverse geocode to get location name
+            location = geolocator.reverse(f"{latitude}, {longitude}", language='en')
+            
+            if location:
+                # Extract a clean location name
+                address = location.raw.get('address', {})
+                
+                # Build location string from address components
+                location_parts = []
+                
+                # Add locality/suburb/village
+                for key in ['suburb', 'neighbourhood', 'village', 'town']:
+                    if address.get(key):
+                        location_parts.append(address[key])
+                        break
+                
+                # Add city
+                for key in ['city', 'municipality', 'county']:
+                    if address.get(key):
+                        location_parts.append(address[key])
+                        break
+                
+                # Add state
+                if address.get('state'):
+                    location_parts.append(address['state'])
+                
+                location_name = ', '.join(location_parts) if location_parts else location.address
+                
+                # Cache the result for 30 days
+                cache.set(cache_key, location_name, 60 * 60 * 24 * 30)
+                
+                return location_name
+            
+            return None
+            
+        except (GeocoderTimedOut, GeocoderServiceError) as e:
+            print(f"Geocoding timeout/service error for ({latitude}, {longitude}): {e}")
+            return None
+        except Exception as e:
+            print(f"Geocoding error for ({latitude}, {longitude}): {e}")
+            return None
+
+    def save(self, *args, **kwargs):
+        """Override save to update status flags"""
+        if self.status == 'ACCEPTED':
+            self.is_accepted = True
+            self.is_rejected = False
+        elif self.status == 'REJECTED':
+            self.is_rejected = True
+            self.is_accepted = False
+        
+        super().save(*args, **kwargs)
 
 class DeliveryNotification(models.Model):
     delivery_boy = models.ForeignKey(DeliveryBoy, on_delete=models.CASCADE, related_name="notifications")
