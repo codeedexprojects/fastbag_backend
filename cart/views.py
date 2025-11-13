@@ -1691,7 +1691,6 @@ class RemoveCouponView(APIView):
             )
 
 
-
 class VendorCheckoutView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -1780,13 +1779,32 @@ class VendorCheckoutView(APIView):
                         subtotal=item.price * item.quantity,
                     )
                     
-                    product_details.append({
+                    # Get product name
+                    product_name = self.get_product_name(item)
+                    
+                    # ✨ FIX: Include ALL necessary fields in product_details
+                    product_detail = {
                         "product_id": item.product_id,
+                        "product_name": product_name,
+                        "product_type": item.product_type,  # ← CRITICAL: This was missing!
                         "variant": item.variant,
                         "quantity": item.quantity,
-                        "color": item.color,
-                        "size": item.size
-                    })
+                        "price_per_unit": float(item.price),
+                        "subtotal": float(item.price * item.quantity),
+                        "status": "pending",
+                    }
+                    
+                    # Add product-specific fields based on type
+                    if item.product_type.lower() == 'clothing':
+                        product_detail["color"] = item.color
+                        product_detail["size"] = item.size
+                    elif item.product_type.lower() == 'grocery':
+                        product_detail["weight"] = item.variant
+                        product_detail["selected_weight"] = item.variant
+                    elif item.product_type.lower() in ['restaurent', 'restaurant']:
+                        product_detail["selected_variant"] = item.variant
+                    
+                    product_details.append(product_detail)
 
                     # Handle stock reduction
                     try:
@@ -1810,7 +1828,7 @@ class VendorCheckoutView(APIView):
                     shipping_address=address,
                     used_coupon=checkout.coupon_code,
                     delivery_pin=delivery_pin,
-                    product_details=product_details
+                    product_details=product_details  # ← Now includes product_type!
                 )
 
                 # Create database notifications
@@ -1948,7 +1966,7 @@ class VendorCheckoutView(APIView):
             elif product_type.lower() == 'grocery':
                 product = GroceryProducts.objects.filter(id=product_id).first()
                 product_name = product.name if product else product_name
-            elif product_type.lower() == 'restaurent':
+            elif product_type.lower() in ['restaurent', 'restaurant']:
                 product = Dish.objects.filter(id=product_id).first()
                 product_name = product.name if product else product_name
         except Exception as e:
