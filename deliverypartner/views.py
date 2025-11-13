@@ -18,7 +18,7 @@ from vendors.authentication import VendorJWTAuthentication
 
 
 class DeliveryBoyListCreateView(generics.ListCreateAPIView):
-    queryset = DeliveryBoy.objects.all()
+    queryset = DeliveryBoy.objects.all().order_by('-id')
     serializer_class = DeliveryBoySerializer
     permission_classes = [IsAdminUser]
 
