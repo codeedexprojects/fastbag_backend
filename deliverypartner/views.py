@@ -336,7 +336,7 @@ class StandardResultsSetPagination(PageNumberPagination):
     max_page_size = 100
 
 
-class DeliveryBoyOrdersListView(generics.ListAPIView):
+class AcceptedOrdersListView(generics.ListAPIView):
     """
     API view to retrieve all orders (accepted and rejected) for a specific delivery boy
     """
