@@ -238,44 +238,6 @@ class VendorListViewAdmin(generics.ListAPIView):
     serializer_class = VendorCreateSerializer
     pagination_class = None
 
-    def get_queryset(self):
-        queryset = super().get_queryset()
-        
-        # Get location parameters from query params
-        lat = self.request.query_params.get('latitude', None)
-        lng = self.request.query_params.get('longitude', None)
-        radius = self.request.query_params.get('radius', None)  # in kilometers
-        
-        # If location parameters are provided, filter by radius
-        if lat and lng and radius:
-            try:
-                user_lat = float(lat)
-                user_lng = float(lng)
-                radius_km = float(radius)
-                
-                # Get all vendors with coordinates
-                vendors_with_location = queryset.filter(
-                    latitude__isnull=False,
-                    longitude__isnull=False
-                ).exclude(latitude=0, longitude=0)
-                
-                # Filter vendors within radius
-                filtered_vendors = []
-                for vendor in vendors_with_location:
-                    distance = self.calculate_distance(
-                        user_lat, user_lng,
-                        float(vendor.latitude), float(vendor.longitude)
-                    )
-                    if distance <= radius_km:
-                        filtered_vendors.append(vendor.id)
-                
-                queryset = queryset.filter(id__in=filtered_vendors)
-                
-            except (ValueError, TypeError):
-                pass  # Invalid parameters, return all vendors
-        
-        return queryset
-    
     @staticmethod
     def calculate_distance(lat1, lon1, lat2, lon2):
         """
@@ -302,6 +264,55 @@ class VendorListViewAdmin(generics.ListAPIView):
         distance = R * c
         return distance
 
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        
+        # Get location parameters from query params
+        lat = self.request.query_params.get('latitude', None)
+        lng = self.request.query_params.get('longitude', None)
+        radius = self.request.query_params.get('radius', None)  # in kilometers
+        
+        # If location parameters are provided, filter by radius
+        if lat and lng and radius:
+            try:
+                user_lat = float(lat)
+                user_lng = float(lng)
+                radius_km = float(radius)
+                
+                # Get all vendors with valid coordinates
+                vendors_with_location = queryset.filter(
+                    latitude__isnull=False,
+                    longitude__isnull=False
+                ).exclude(latitude=0, longitude=0).exclude(latitude='', longitude='')
+                
+                # Filter vendors within radius
+                filtered_vendor_ids = []
+                for vendor in vendors_with_location:
+                    try:
+                        vendor_lat = float(vendor.latitude)
+                        vendor_lng = float(vendor.longitude)
+                        
+                        distance = self.calculate_distance(
+                            user_lat, user_lng,
+                            vendor_lat, vendor_lng
+                        )
+                        
+                        if distance <= radius_km:
+                            filtered_vendor_ids.append(vendor.id)
+                    except (ValueError, TypeError):
+                        # Skip vendors with invalid coordinates
+                        continue
+                
+                queryset = queryset.filter(id__in=filtered_vendor_ids)
+                
+            except (ValueError, TypeError) as e:
+                print(f"Location filter error: {e}")
+                # Invalid parameters, return empty queryset or all vendors
+                # return queryset  # Return all if you want, or:
+                pass
+        
+        return queryset
+
     def list(self, request, *args, **kwargs):
         queryset = self.get_queryset()
         serializer = self.get_serializer(queryset, many=True)
@@ -310,32 +321,45 @@ class VendorListViewAdmin(generics.ListAPIView):
         lat = request.query_params.get('latitude', None)
         lng = request.query_params.get('longitude', None)
         
+        data = serializer.data
+        
         if lat and lng:
             try:
                 user_lat = float(lat)
                 user_lng = float(lng)
                 
                 # Add distance to each vendor
-                data = serializer.data
                 for vendor_data in data:
-                    if vendor_data.get('latitude') and vendor_data.get('longitude'):
-                        distance = self.calculate_distance(
-                            user_lat, user_lng,
-                            float(vendor_data['latitude']),
-                            float(vendor_data['longitude'])
-                        )
-                        vendor_data['distance_km'] = round(distance, 2)
+                    vendor_lat = vendor_data.get('latitude')
+                    vendor_lng = vendor_data.get('longitude')
+                    
+                    if vendor_lat and vendor_lng:
+                        try:
+                            distance = self.calculate_distance(
+                                user_lat, user_lng,
+                                float(vendor_lat),
+                                float(vendor_lng)
+                            )
+                            vendor_data['distance_km'] = round(distance, 2)
+                        except (ValueError, TypeError):
+                            vendor_data['distance_km'] = None
                     else:
                         vendor_data['distance_km'] = None
                 
-                # Sort by distance
+                # Sort by distance (vendors with no distance go to end)
                 data.sort(key=lambda x: x['distance_km'] if x['distance_km'] is not None else float('inf'))
                 
-                return Response(data)
-            except (ValueError, TypeError):
-                pass
+            except (ValueError, TypeError) as e:
+                print(f"Distance calculation error: {e}")
+                # Add None distance for all vendors if there's an error
+                for vendor_data in data:
+                    vendor_data['distance_km'] = None
+        else:
+            # No location params, set distance_km to None for all
+            for vendor_data in data:
+                vendor_data['distance_km'] = None
         
-        return Response(serializer.data)
+        return Response(data)
 
 class VendorDetailView(generics.RetrieveUpdateDestroyAPIView):
     authentication_classes = [VendorJWTAuthentication]
