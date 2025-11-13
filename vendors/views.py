@@ -238,6 +238,105 @@ class VendorListViewAdmin(generics.ListAPIView):
     serializer_class = VendorCreateSerializer
     pagination_class = None
 
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        
+        # Get location parameters from query params
+        lat = self.request.query_params.get('latitude', None)
+        lng = self.request.query_params.get('longitude', None)
+        radius = self.request.query_params.get('radius', None)  # in kilometers
+        
+        # If location parameters are provided, filter by radius
+        if lat and lng and radius:
+            try:
+                user_lat = float(lat)
+                user_lng = float(lng)
+                radius_km = float(radius)
+                
+                # Get all vendors with coordinates
+                vendors_with_location = queryset.filter(
+                    latitude__isnull=False,
+                    longitude__isnull=False
+                ).exclude(latitude=0, longitude=0)
+                
+                # Filter vendors within radius
+                filtered_vendors = []
+                for vendor in vendors_with_location:
+                    distance = self.calculate_distance(
+                        user_lat, user_lng,
+                        float(vendor.latitude), float(vendor.longitude)
+                    )
+                    if distance <= radius_km:
+                        filtered_vendors.append(vendor.id)
+                
+                queryset = queryset.filter(id__in=filtered_vendors)
+                
+            except (ValueError, TypeError):
+                pass  # Invalid parameters, return all vendors
+        
+        return queryset
+    
+    @staticmethod
+    def calculate_distance(lat1, lon1, lat2, lon2):
+        """
+        Calculate the distance between two points on Earth using Haversine formula
+        Returns distance in kilometers
+        """
+        # Earth's radius in kilometers
+        R = 6371.0
+        
+        # Convert coordinates to radians
+        lat1_rad = radians(lat1)
+        lon1_rad = radians(lon1)
+        lat2_rad = radians(lat2)
+        lon2_rad = radians(lon2)
+        
+        # Differences
+        dlat = lat2_rad - lat1_rad
+        dlon = lon2_rad - lon1_rad
+        
+        # Haversine formula
+        a = sin(dlat / 2)**2 + cos(lat1_rad) * cos(lat2_rad) * sin(dlon / 2)**2
+        c = 2 * atan2(sqrt(a), sqrt(1 - a))
+        
+        distance = R * c
+        return distance
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.get_queryset()
+        serializer = self.get_serializer(queryset, many=True)
+        
+        # Add distance information if location params provided
+        lat = request.query_params.get('latitude', None)
+        lng = request.query_params.get('longitude', None)
+        
+        if lat and lng:
+            try:
+                user_lat = float(lat)
+                user_lng = float(lng)
+                
+                # Add distance to each vendor
+                data = serializer.data
+                for vendor_data in data:
+                    if vendor_data.get('latitude') and vendor_data.get('longitude'):
+                        distance = self.calculate_distance(
+                            user_lat, user_lng,
+                            float(vendor_data['latitude']),
+                            float(vendor_data['longitude'])
+                        )
+                        vendor_data['distance_km'] = round(distance, 2)
+                    else:
+                        vendor_data['distance_km'] = None
+                
+                # Sort by distance
+                data.sort(key=lambda x: x['distance_km'] if x['distance_km'] is not None else float('inf'))
+                
+                return Response(data)
+            except (ValueError, TypeError):
+                pass
+        
+        return Response(serializer.data)
+
 class VendorDetailView(generics.RetrieveUpdateDestroyAPIView):
     authentication_classes = [VendorJWTAuthentication]
     permission_classes = [IsAuthenticated]
