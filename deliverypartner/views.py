@@ -657,6 +657,9 @@ class CalculateDeliveryChargeAPIView(APIView):
 
 from django.db import transaction
 from decimal import Decimal
+import logging
+
+logger = logging.getLogger(__name__)
 
 class DeliverOrderView(generics.UpdateAPIView):
     permission_classes = []
@@ -710,60 +713,82 @@ class DeliverOrderView(generics.UpdateAPIView):
     def create_vendor_commissions(self, order):
         """
         Calculate and create commission record for the vendor
-        Since there's only one vendor per order, get vendor from first item
         """
-        # Get first active order item
-        first_item = order.order_items.exclude(status='cancelled').first()
-        
-        if not first_item:
-            return None
-        
-        # Get vendor based on product type
-        vendor = None
-        
         try:
+            # Get first active order item
+            first_item = order.order_items.exclude(status='cancelled').first()
+            
+            if not first_item:
+                logger.error(f"No active items found for order {order.order_id}")
+                return None
+            
+            logger.info(f"First item: product_id={first_item.product_id}, product_type={first_item.product_type}")
+            
+            # Get vendor based on product type
+            vendor = None
+            
             if first_item.product_type == 'clothing':
-                clothing = Clothing.objects.select_related('vendor').get(id=first_item.product_id)
-                vendor = clothing.vendor
-                
+                try:
+                    clothing = Clothing.objects.select_related('vendor').get(id=first_item.product_id)
+                    vendor = clothing.vendor
+                    logger.info(f"Found clothing vendor: {vendor.business_name}")
+                except Clothing.DoesNotExist:
+                    logger.error(f"Clothing with id {first_item.product_id} not found")
+                    
             elif first_item.product_type == 'dish':
-                dish = Dish.objects.select_related('vendor').get(id=first_item.product_id)
-                vendor = dish.vendor
-                
+                try:
+                    dish = Dish.objects.select_related('vendor').get(id=first_item.product_id)
+                    vendor = dish.vendor
+                    logger.info(f"Found dish vendor: {vendor.business_name}")
+                except Dish.DoesNotExist:
+                    logger.error(f"Dish with id {first_item.product_id} not found")
+                    
             elif first_item.product_type == 'grocery':
-                grocery = GroceryProducts.objects.select_related('vendor').get(id=first_item.product_id)
-                vendor = grocery.vendor
-                
-        except (Clothing.DoesNotExist, Dish.DoesNotExist, GroceryProducts.DoesNotExist):
+                try:
+                    grocery = GroceryProducts.objects.select_related('vendor').get(id=first_item.product_id)
+                    vendor = grocery.vendor
+                    logger.info(f"Found grocery vendor: {vendor.business_name}")
+                except GroceryProducts.DoesNotExist:
+                    logger.error(f"Grocery with id {first_item.product_id} not found")
+            
+            if not vendor:
+                logger.error(f"No vendor found for product_id {first_item.product_id}, product_type {first_item.product_type}")
+                return None
+            
+            # Get vendor's commission percentage
+            vendor_commission = vendor.commission if vendor.commission else Decimal('0.00')
+            
+            logger.info(f"Vendor commission: {vendor_commission}%")
+            
+            # Use order's final amount for commission calculation
+            final_amount = Decimal(str(order.final_amount))
+            
+            # Calculate commission amount
+            commission_amount = (final_amount * vendor_commission) / Decimal('100')
+            
+            logger.info(f"Final amount: {final_amount}, Commission amount: {commission_amount}")
+            
+            # Create commission record
+            vendor_comm = VendorCommission.objects.create(
+                vendor=vendor,
+                commission_percentage=vendor_commission,
+                commission_amount=commission_amount,
+                total_sales=final_amount,
+                payment_status='pending'
+            )
+            
+            logger.info(f"Commission created successfully: ID {vendor_comm.id}")
+            
+            # Return commission details
+            return {
+                'commission_id': vendor_comm.id,
+                'vendor_id': vendor.id,
+                'vendor_name': vendor.business_name,
+                'total_sales': str(final_amount),
+                'commission_percentage': str(vendor_commission),
+                'commission_amount': str(commission_amount)
+            }
+            
+        except Exception as e:
+            logger.error(f"Error creating commission: {str(e)}", exc_info=True)
             return None
-        
-        if not vendor:
-            return None
-        
-        # Get vendor's commission percentage
-        vendor_commission = vendor.commission or Decimal('0.00')
-        
-        # Use order's final amount for commission calculation
-        final_amount = Decimal(str(order.final_amount))
-        
-        # Calculate commission amount
-        commission_amount = (final_amount * vendor_commission) / Decimal('100')
-        
-        # Create commission record
-        vendor_comm = VendorCommission.objects.create(
-            vendor=vendor,
-            commission_percentage=vendor_commission,
-            commission_amount=commission_amount,
-            total_sales=final_amount,
-            payment_status='pending'
-        )
-        
-        # Return commission details
-        return {
-            'commission_id': vendor_comm.id,
-            'vendor_id': vendor.id,
-            'vendor_name': vendor.business_name,
-            'total_sales': str(final_amount),
-            'commission_percentage': str(vendor_commission),
-            'commission_amount': str(commission_amount)
-        }
