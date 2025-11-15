@@ -116,11 +116,78 @@ class CartSerializer(serializers.ModelSerializer):
 
 
 class CheckoutItemSerializer(serializers.ModelSerializer):
+    product_name = serializers.SerializerMethodField()
+    product_image = serializers.SerializerMethodField()
+    product_type = serializers.SerializerMethodField()
+    
     class Meta:
         model = CheckoutItem
         fields = '__all__'
-    def get_items(self, obj):
-        return CheckoutItemSerializer(obj.items.all(), many=True).data
+    
+    def get_product_name(self, obj):
+        """Get product name based on product type"""
+        if obj.product_type == 'grocery':
+            try:
+                product = GroceryProducts.objects.get(id=obj.product_id)
+                return product.name
+            except GroceryProducts.DoesNotExist:
+                return f"Product {obj.product_id}"
+        
+        elif obj.product_type == 'restaurant':
+            try:
+                product = Dish.objects.get(id=obj.product_id)
+                return product.name
+            except Dish.DoesNotExist:
+                return f"Product {obj.product_id}"
+        
+        else:  # fashion/clothing
+            try:
+                product = Clothing.objects.get(id=obj.product_id)
+                return product.name
+            except Clothing.DoesNotExist:
+                return f"Product {obj.product_id}"
+    
+    def get_product_image(self, obj):
+        """Get product image based on product type"""
+        request = self.context.get('request')
+        
+        if obj.product_type == 'grocery':
+            try:
+                product = GroceryProducts.objects.get(id=obj.product_id)
+                if hasattr(product, 'image') and product.image and request:
+                    return request.build_absolute_uri(product.image.url)
+            except GroceryProducts.DoesNotExist:
+                pass
+        
+        elif obj.product_type == 'restaurant':
+            try:
+                product = Dish.objects.get(id=obj.product_id)
+                if hasattr(product, 'image') and product.image and request:
+                    return request.build_absolute_uri(product.image.url)
+            except Dish.DoesNotExist:
+                pass
+        
+        else:  # fashion/clothing
+            try:
+                product = Clothing.objects.get(id=obj.product_id)
+                if hasattr(product, 'images'):
+                    first_image = product.images.first()
+                    if first_image and first_image.image and request:
+                        return request.build_absolute_uri(first_image.image.url)
+            except Clothing.DoesNotExist:
+                pass
+        
+        return ""
+    
+    def get_product_type(self, obj):
+        """Return user-friendly product type"""
+        if obj.product_type == 'grocery':
+            return 'Grocery'
+        elif obj.product_type == 'restaurant':
+            return 'Restaurant'
+        else:
+            return 'Fashion'
+        
 import logging
 
 logger = logging.getLogger(__name__)

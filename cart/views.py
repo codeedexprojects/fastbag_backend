@@ -1264,7 +1264,7 @@ class VendorOrderDetailView(APIView):
             "contact_number": order.contact_number,
             "created_at": order.created_at,
             "updated_at": order.updated_at,
-            "products": CheckoutItemSerializer(vendor_items, many=True).data
+            "products": CheckoutItemSerializer(vendor_items, many=True, context={'request': request}).data
         }
 
         return Response(data)
