@@ -43,6 +43,24 @@ class Dish(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     is_wishlisted = models.BooleanField(default=False)
 
+class Dish(models.Model):
+    vendor = models.ForeignKey(Vendor, on_delete=models.CASCADE, related_name='dishes')
+    category = models.ForeignKey(Category, on_delete=models.CASCADE, related_name='dishes')
+    subcategory = models.ForeignKey(SubCategory, on_delete=models.CASCADE, related_name='dishes', null=True, blank=True)
+    name = models.CharField(max_length=255)
+    wholesale_price = models.DecimalField(default=0,max_digits=10, decimal_places=2)
+    description = models.TextField(null=True, blank=True)
+    price = models.DecimalField(max_digits=10, decimal_places=2)
+    offer_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    discount = models.DecimalField(max_digits=5, decimal_places=2, help_text="Discount percentage", default=0)
+    variants = models.JSONField(default=list,help_text="Store different variants (name, price, stock status) as a dictionary")
+    is_available = models.BooleanField(default=True)
+    is_veg = models.BooleanField(default=False)
+    is_offer_product = models.BooleanField(default=False)
+    is_popular_product = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    is_wishlisted = models.BooleanField(default=False)
+
 
     def __str__(self):
         return self.name

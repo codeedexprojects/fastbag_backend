@@ -118,73 +118,75 @@ class CartSerializer(serializers.ModelSerializer):
 class CheckoutItemSerializer(serializers.ModelSerializer):
     product_name = serializers.SerializerMethodField()
     product_image = serializers.SerializerMethodField()
-    product_type = serializers.SerializerMethodField()
+    product_type_display = serializers.SerializerMethodField()
     
     class Meta:
         model = CheckoutItem
         fields = '__all__'
     
     def get_product_name(self, obj):
-        """Get product name based on product type"""
-        if obj.product_type == 'grocery':
-            try:
+        """Get product name based on product type - ONLY check the correct table"""
+        # Make sure we're checking the product_type field from CheckoutItem
+        product_type = getattr(obj, 'product_type', '').lower()
+        
+        try:
+            if product_type == 'grocery':
                 product = GroceryProducts.objects.get(id=obj.product_id)
                 return product.name
-            except GroceryProducts.DoesNotExist:
-                return f"Product {obj.product_id}"
-        
-        elif obj.product_type == 'restaurant':
-            try:
+            
+            elif product_type == 'restaurant':
                 product = Dish.objects.get(id=obj.product_id)
                 return product.name
-            except Dish.DoesNotExist:
-                return f"Product {obj.product_id}"
-        
-        else:  # fashion/clothing
-            try:
+            
+            elif product_type == 'fashion' or not product_type:
+                # Default to clothing for backward compatibility
                 product = Clothing.objects.get(id=obj.product_id)
                 return product.name
-            except Clothing.DoesNotExist:
-                return f"Product {obj.product_id}"
+            
+            else:
+                return f"Unknown Product Type: {product_type}"
+                
+        except (Clothing.DoesNotExist, GroceryProducts.DoesNotExist, Dish.DoesNotExist):
+            return f"Product {obj.product_id} (Not Found)"
     
     def get_product_image(self, obj):
-        """Get product image based on product type"""
+        """Get product image based on product type - ONLY check the correct table"""
         request = self.context.get('request')
+        product_type = getattr(obj, 'product_type', '').lower()
         
-        if obj.product_type == 'grocery':
-            try:
+        try:
+            if product_type == 'grocery':
                 product = GroceryProducts.objects.get(id=obj.product_id)
                 if hasattr(product, 'image') and product.image and request:
                     return request.build_absolute_uri(product.image.url)
-            except GroceryProducts.DoesNotExist:
-                pass
-        
-        elif obj.product_type == 'restaurant':
-            try:
+            
+            elif product_type == 'restaurant':
                 product = Dish.objects.get(id=obj.product_id)
                 if hasattr(product, 'image') and product.image and request:
                     return request.build_absolute_uri(product.image.url)
-            except Dish.DoesNotExist:
-                pass
-        
-        else:  # fashion/clothing
-            try:
+            
+            elif product_type == 'fashion' or not product_type:
                 product = Clothing.objects.get(id=obj.product_id)
                 if hasattr(product, 'images'):
                     first_image = product.images.first()
                     if first_image and first_image.image and request:
                         return request.build_absolute_uri(first_image.image.url)
-            except Clothing.DoesNotExist:
-                pass
+        
+        except (Clothing.DoesNotExist, GroceryProducts.DoesNotExist, Dish.DoesNotExist):
+            pass
         
         return ""
     
-    def get_product_type(self, obj):
+    def get_product_type_display(self, obj):
         """Return user-friendly product type"""
-        if obj.product_type == 'grocery':
+        product_type = getattr(obj, 'product_type', '').lower()
+        
+        if product_type == 'grocery':
             return 'Grocery'
-        elif obj.product_type == 'restaurant':
+        elif product_type == 'restaurant':
             return 'Restaurant'
+        elif product_type == 'fashion':
+            return 'Fashion'
         else:
             return 'Fashion'
         
