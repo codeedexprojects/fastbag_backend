@@ -2711,14 +2711,6 @@ class OrderAssignByStatusAPIView(APIView):
 
             queryset = queryset.filter(status=order_status)
 
-        # optimize
-        queryset = queryset.select_related(
-            'order', 'delivery_boy', 'order__user', 'order__checkout'
-        ).prefetch_related(
-            'order__user__addresses',
-            'order__checkout__items__vendor'
-        ).order_by('-assigned_at')
-
         serializer = DeliveryBoyOrderAssignSerializer(queryset, many=True)
 
         return Response(
