@@ -708,77 +708,19 @@ class DeliverOrderView(generics.UpdateAPIView):
 
     @transaction.atomic
     def create_vendor_commissions(self, order):
-        """
-        Calculate and create commission records for vendors based on delivered order items
-        Commission = (Order Item Subtotal * Vendor Commission Percentage) / 100
-        """
-        from collections import defaultdict
-        
-        # Group order items by vendor and calculate their sales
-        vendor_data = defaultdict(lambda: {'sales': Decimal('0.00'), 'vendor': None})
-        
-        for item in order.order_items.all():
-            # Skip cancelled items
-            if item.status == 'cancelled':
-                continue
-            
-            # Get vendor based on product type
-            vendor = None
-            
-            try:
-                if item.product_type == 'clothing':
-                    clothing = Clothing.objects.select_related('vendor').get(id=item.product_id)
-                    vendor = clothing.vendor
-                    
-                elif item.product_type == 'dish':
-                    dish = Dish.objects.select_related('vendor').get(id=item.product_id)
-                    vendor = dish.vendor
-                    
-                elif item.product_type == 'grocery':
-                    grocery = GroceryProducts.objects.select_related('vendor').get(id=item.product_id)
-                    vendor = grocery.vendor
-                
-                # If vendor found, add to their sales
-                if vendor:
-                    vendor_data[vendor.id]['vendor'] = vendor
-                    # Add the item's subtotal to vendor's total sales
-                    vendor_data[vendor.id]['sales'] += Decimal(str(item.subtotal))
-                    
-            except (Clothing.DoesNotExist, Dish.DoesNotExist, GroceryProducts.DoesNotExist):
-                # If product not found, skip this item
-                continue
-        
-        # Create commission records for each vendor
-        commission_details = []
-        
-        for vendor_id, data in vendor_data.items():
-            vendor = data['vendor']
-            total_sales = data['sales']
-            
-            # Get vendor's commission percentage
-            commission_percentage = vendor.commission or Decimal('0.00')
-            
-            # Calculate commission amount
-            # Formula: (Total Sales * Commission Percentage) / 100
-            commission_amount = (total_sales * commission_percentage) / Decimal('100')
-            
-            # Create the commission record
-            commission = VendorCommission.objects.create(
-                vendor=vendor,
-                total_sales=total_sales,
-                commission_percentage=commission_percentage,
-                commission_amount=commission_amount,
-                payment_status='pending'
-            )
-            
-            # Add to response details
-            commission_details.append({
-                'commission_id': commission.id,
-                'vendor_id': vendor.id,
-                'vendor_name': vendor.business_name,
-                'total_sales': str(total_sales),
-                'commission_percentage': str(commission_percentage),
-                'commission_amount': str(commission_amount)
-            })
-        
-        return commission_details
+        vendor = order.order_items.first().vendor
+        vendor_commission = vendor.commission
+        final_amount = order.final_amount
+
+        commission_amount = (final_amount * vendor_commission) / 100
+
+        vendor_comm = VendorCommission.objects.create(
+            vendor=vendor,
+            commission_percentage=vendor_commission,
+            commission_amount=commission_amount,
+            total_sales=final_amount
+        )
+
+        vendor_comm.save()
+
+        return vendor_comm
