@@ -2079,6 +2079,8 @@ class VendorCheckoutView(APIView):
 
 import hmac
 import hashlib
+from django.db import transaction
+
 class RazorpayPaymentVerifyView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -2095,7 +2097,14 @@ class RazorpayPaymentVerifyView(APIView):
             order = Order.objects.get(checkout=checkout)
         except Checkout.DoesNotExist:
             return Response({"error": "Invalid order reference."}, status=status.HTTP_404_NOT_FOUND)
+        except Order.DoesNotExist:
+            return Response({"error": "Order not found."}, status=status.HTTP_404_NOT_FOUND)
 
+        # Check if payment already verified (prevent replay attacks)
+        if checkout.payment_status == 'paid':
+            return Response({"error": "Payment already verified."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Verify signature
         generated_signature = hmac.new(
             key=settings.RAZORPAY_KEY_SECRET.encode(),
             msg=(razorpay_order_id + "|" + razorpay_payment_id).encode(),
@@ -2103,24 +2112,37 @@ class RazorpayPaymentVerifyView(APIView):
         ).hexdigest()
 
         if generated_signature != razorpay_signature:
-            order.order_status = 'payment_failed'
-            order.save(update_fields=['order_status'])
+            # Use atomic transaction for failure case too
+            with transaction.atomic():
+                order.order_status = 'payment_failed'
+                order.save(update_fields=['order_status'])
+                
+                Notification.objects.create(
+                    user=order.user,
+                    order=order,
+                    title="Payment Failed",
+                    message=f"Payment verification failed for order {order.order_id}.",
+                    notification_type='payment_failed'
+                )
+            
             return Response({"error": "Payment signature verification failed."}, status=status.HTTP_400_BAD_REQUEST)
 
-        checkout.payment_status = 'paid'
-        checkout.razorpay_payment_id = razorpay_payment_id
-        checkout.save(update_fields=['payment_status', 'razorpay_payment_id'])
+        # Use atomic transaction for success case
+        with transaction.atomic():
+            checkout.payment_status = 'paid'
+            checkout.razorpay_payment_id = razorpay_payment_id
+            checkout.save(update_fields=['payment_status', 'razorpay_payment_id'])
 
-        order.order_status = 'confirmed'
-        order.save(update_fields=['order_status'])
+            order.order_status = 'confirmed'
+            order.save(update_fields=['order_status'])
 
-        Notification.objects.create(
-            user=order.user,
-            order=order,
-            title="Payment Successful",
-            message=f"Your payment for order {order.order_id} was successful.",
-            notification_type='payment_success'
-        )
+            Notification.objects.create(
+                user=order.user,
+                order=order,
+                title="Payment Successful",
+                message=f"Your payment for order {order.order_id} was successful.",
+                notification_type='payment_success'
+            )
 
         return Response({
             "message": "Payment verified successfully.",
