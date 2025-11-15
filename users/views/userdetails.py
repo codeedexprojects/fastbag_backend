@@ -105,6 +105,7 @@ class RegisterView(APIView):
         serializer = RegisterSerializer(data=request.data)
         if serializer.is_valid():
             mobile_number = serializer.validated_data['mobile_number']
+            name = serializer.validated_data['name']
             otp = str(random.randint(100000, 999999))
 
             try:
@@ -124,6 +125,8 @@ class RegisterView(APIView):
 
                 return Response({
                     "message": "OTP sent successfully",
+                    "otp":otp,
+                    "name":name,
                     "mobile_number": mobile_number,
                 }, status=status.HTTP_201_CREATED)
 
