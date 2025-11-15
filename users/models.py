@@ -193,9 +193,18 @@ class BigBuyOrder(models.Model):
     diet_category = models.CharField(max_length=100, blank=True, null=True)
     additional_notes = models.TextField(blank=True, null=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
+    
+    # NEW: Address field
+    delivery_address = models.ForeignKey(
+        'Address',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='bigbuy_orders'
+    )
+    
     created_at = models.DateTimeField(auto_now_add=True)
     cancel_reason = models.TextField(blank=True, null=True)
-
 
     def save(self, *args, **kwargs):
         if not self.order_id:

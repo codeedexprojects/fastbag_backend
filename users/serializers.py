@@ -254,6 +254,14 @@ class BigBuyOrderSerializer(serializers.ModelSerializer):
     order_items = BigBuyOrderItemSerializer(many=True, required=True)
     user_name = serializers.CharField(source='user.name', read_only=True)
     order_id = serializers.CharField(read_only=True)
+    delivery_address = AddressSerializer(read_only=True)
+    delivery_address_id = serializers.PrimaryKeyRelatedField(
+        queryset=Address.objects.all(),
+        source='delivery_address',
+        write_only=True,
+        required=False,
+        allow_null=True
+    )
 
     class Meta:
         model = BigBuyOrder
@@ -268,6 +276,8 @@ class BigBuyOrderSerializer(serializers.ModelSerializer):
             'special_occasion',
             'diet_category',
             'additional_notes',
+            'delivery_address',
+            'delivery_address_id',
             'created_at',
             'user',
             'user_name'
@@ -276,7 +286,6 @@ class BigBuyOrderSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         order_items_data = validated_data.pop('order_items')
-
         order = BigBuyOrder.objects.create(**validated_data)
 
         for item_data in order_items_data:
@@ -287,7 +296,6 @@ class BigBuyOrderSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         if 'order_items' in validated_data:
             order_items_data = validated_data.pop('order_items')
-
             instance.order_items.all().delete()
 
             for item_data in order_items_data:
