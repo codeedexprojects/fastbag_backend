@@ -727,7 +727,7 @@ class DeliverOrderView(generics.UpdateAPIView):
             # Get vendor based on product type
             vendor = None
             
-            if first_item.product_type == 'clothing':
+            if first_item.product_type == 'Fashion':
                 try:
                     clothing = Clothing.objects.select_related('vendor').get(id=first_item.product_id)
                     vendor = clothing.vendor
@@ -735,7 +735,7 @@ class DeliverOrderView(generics.UpdateAPIView):
                 except Clothing.DoesNotExist:
                     logger.error(f"Clothing with id {first_item.product_id} not found")
                     
-            elif first_item.product_type == 'dish':
+            elif first_item.product_type == 'Restaurant':
                 try:
                     dish = Dish.objects.select_related('vendor').get(id=first_item.product_id)
                     vendor = dish.vendor
@@ -743,7 +743,7 @@ class DeliverOrderView(generics.UpdateAPIView):
                 except Dish.DoesNotExist:
                     logger.error(f"Dish with id {first_item.product_id} not found")
                     
-            elif first_item.product_type == 'grocery':
+            elif first_item.product_type == 'Grocery':
                 try:
                     grocery = GroceryProducts.objects.select_related('vendor').get(id=first_item.product_id)
                     vendor = grocery.vendor
