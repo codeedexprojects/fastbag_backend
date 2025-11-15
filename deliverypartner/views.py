@@ -706,20 +706,64 @@ class DeliverOrderView(generics.UpdateAPIView):
             "commissions_created": commission_details
         }, status=status.HTTP_200_OK)
 
+    @transaction.atomic
     def create_vendor_commissions(self, order):
-        vendor = order.order_items.first().vendor
-        vendor_commission = vendor.commission
-        final_amount = order.final_amount
-
-        commission_amount = (final_amount * vendor_commission) / 100
-
+        """
+        Calculate and create commission record for the vendor
+        Since there's only one vendor per order, get vendor from first item
+        """
+        # Get first active order item
+        first_item = order.order_items.exclude(status='cancelled').first()
+        
+        if not first_item:
+            return None
+        
+        # Get vendor based on product type
+        vendor = None
+        
+        try:
+            if first_item.product_type == 'clothing':
+                clothing = Clothing.objects.select_related('vendor').get(id=first_item.product_id)
+                vendor = clothing.vendor
+                
+            elif first_item.product_type == 'dish':
+                dish = Dish.objects.select_related('vendor').get(id=first_item.product_id)
+                vendor = dish.vendor
+                
+            elif first_item.product_type == 'grocery':
+                grocery = GroceryProducts.objects.select_related('vendor').get(id=first_item.product_id)
+                vendor = grocery.vendor
+                
+        except (Clothing.DoesNotExist, Dish.DoesNotExist, GroceryProducts.DoesNotExist):
+            return None
+        
+        if not vendor:
+            return None
+        
+        # Get vendor's commission percentage
+        vendor_commission = vendor.commission or Decimal('0.00')
+        
+        # Use order's final amount for commission calculation
+        final_amount = Decimal(str(order.final_amount))
+        
+        # Calculate commission amount
+        commission_amount = (final_amount * vendor_commission) / Decimal('100')
+        
+        # Create commission record
         vendor_comm = VendorCommission.objects.create(
             vendor=vendor,
             commission_percentage=vendor_commission,
             commission_amount=commission_amount,
-            total_sales=final_amount
+            total_sales=final_amount,
+            payment_status='pending'
         )
-
-        vendor_comm.save()
-
-        return vendor_comm
+        
+        # Return commission details
+        return {
+            'commission_id': vendor_comm.id,
+            'vendor_id': vendor.id,
+            'vendor_name': vendor.business_name,
+            'total_sales': str(final_amount),
+            'commission_percentage': str(vendor_commission),
+            'commission_amount': str(commission_amount)
+        }
