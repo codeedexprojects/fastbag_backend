@@ -387,6 +387,10 @@ class AcceptedOrdersByVendorListView(generics.ListAPIView):
         return orders
 
 
+from django.db import transaction
+from decimal import Decimal
+from vendors.models import VendorCommission
+
 class UpdateOrderStatusView(generics.UpdateAPIView):
     queryset = OrderAssign.objects.all()
     serializer_class = OrderAssignStatusUpdateSerializer
@@ -413,14 +417,78 @@ class UpdateOrderStatusView(generics.UpdateAPIView):
         if new_status not in valid_statuses:
             return Response({"detail": "Invalid status."}, status=status.HTTP_400_BAD_REQUEST)
 
+        # Update status
         order_assign.status = new_status
         order_assign.save()
+
+        # Update main order status
+        order = order_assign.order
+        order.order_status = 'delivered' if new_status == 'DELIVERED' else order.order_status
+        order.save()
+
+        # Calculate and create commission when order is delivered
+        if new_status == 'DELIVERED':
+            self.create_vendor_commissions(order)
 
         return Response({
             "message": f"Order status updated to {new_status}.",
             "delivery_boy_id": delivery_boy_id,
             "order_id": order_id
         }, status=status.HTTP_200_OK)
+
+    @transaction.atomic
+    def create_vendor_commissions(self, order):
+        """
+        Calculate and create commission records for vendors based on delivered order items
+        """
+        from collections import defaultdict
+        
+        # Group order items by vendor
+        vendor_sales = defaultdict(Decimal)
+        
+        for item in order.order_items.all():
+            if item.status == 'cancelled':
+                continue
+                
+            # Get vendor based on product type
+            vendor = None
+            
+            if item.product_type == 'clothing':
+                try:
+                    clothing = Clothing.objects.get(id=item.product_id)
+                    vendor = clothing.vendor
+                except Clothing.DoesNotExist:
+                    continue
+                    
+            elif item.product_type == 'dish':
+                try:
+                    dish = Dish.objects.get(id=item.product_id)
+                    vendor = dish.vendor
+                except Dish.DoesNotExist:
+                    continue
+                    
+            elif item.product_type == 'grocery':
+                try:
+                    grocery = GroceryProducts.objects.get(id=item.product_id)
+                    vendor = grocery.vendor
+                except GroceryProducts.DoesNotExist:
+                    continue
+            
+            if vendor:
+                vendor_sales[vendor] += Decimal(str(item.subtotal))
+        
+        # Create commission records for each vendor
+        for vendor, total_sales in vendor_sales.items():
+            commission_percentage = vendor.commission
+            commission_amount = (total_sales * commission_percentage) / Decimal('100')
+            
+            VendorCommission.objects.create(
+                vendor=vendor,
+                total_sales=total_sales,
+                commission_percentage=commission_percentage,
+                commission_amount=commission_amount,
+                payment_status='pending'
+            )
 
 
 class DeliveryBoyOrderListView(generics.ListAPIView):
