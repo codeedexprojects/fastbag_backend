@@ -2682,51 +2682,49 @@ from deliverypartner.serializers import DeliveryBoyOrderAssignSerializer
 
 class OrderAssignByStatusAPIView(APIView):
     permission_classes = []
-    
+
     def get(self, request, delivery_boy_id):
-        # Get status from query parameters
-        order_status = request.query_params.get('status', None)
-        
-        # Get all OrderAssign records
-        queryset = OrderAssign.objects.filter(delivery_boy=delivery_boy_id)
-        
-        # Filter by status if provided
+        # Read status from query params
+        order_status = request.query_params.get('status')
+
+        # All valid statuses
+        valid_statuses = [
+            'ASSIGNED', 'ACCEPTED', 'PICKED', 'ON_THE_WAY',
+            'DELIVERED', 'RETURNED', 'REJECTED'
+        ]
+
+        # Get all orders assigned to this delivery boy
+        queryset = OrderAssign.objects.filter(delivery_boy_id=delivery_boy_id)
+
+        # If status is passed, filter it
         if order_status:
-            # Validate if status is valid
-            valid_statuses = ['ASSIGNED', 'ACCEPTED', 'PICKED', 'ON_THE_WAY', 'DELIVERED', 'RETURNED', 'REJECTED']
-            
-            if order_status.upper() not in valid_statuses:
+            order_status = order_status.upper()
+
+            if order_status not in valid_statuses:
                 return Response(
                     {
-                        'error': 'Invalid status',
-                        'message': f'Status must be one of: {", ".join(valid_statuses)}'
+                        "error": "Invalid status",
+                        "allowed": valid_statuses
                     },
                     status=status.HTTP_400_BAD_REQUEST
                 )
-            
-            queryset = queryset.filter(status=order_status.upper())
-        
-        # Select related to optimize queries
+
+            queryset = queryset.filter(status=order_status)
+
+        # optimize
         queryset = queryset.select_related(
-            'order', 
-            'delivery_boy', 
-            'order__user',
-            'order__checkout'
+            'order', 'delivery_boy', 'order__user', 'order__checkout'
         ).prefetch_related(
             'order__user__addresses',
             'order__checkout__items__vendor'
         ).order_by('-assigned_at')
-        
-        # Paginate the results (optional - if you want pagination)
-        # For now, returning all results
+
         serializer = DeliveryBoyOrderAssignSerializer(queryset, many=True)
-        
+
         return Response(
             {
-                'count': queryset.count(),
-                'next': None,
-                'previous': None,
-                'results': serializer.data
+                "count": queryset.count(),
+                "results": serializer.data
             },
             status=status.HTTP_200_OK
         )
