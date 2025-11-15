@@ -37,5 +37,6 @@ urlpatterns =[
     path('admin/delivery-charges/', DeliveryChargesAPIView.as_view(), name='delivery-charges-list-create'),
     path('admin/delivery-charges/<int:pk>/', DeliveryChargesAPIView.as_view(), name='delivery-charges-detail'),
     path('admin/delivery-charges/calculate/', CalculateDeliveryChargeAPIView.as_view(), name='calculate-delivery-charge'),
+    path('delivery-boy/<int:delivery_boy_id>/order/<str:order_id>/deliver/', DeliverOrderView.as_view(), name='deliver-order'),
 
 ]

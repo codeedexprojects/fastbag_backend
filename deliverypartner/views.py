@@ -16,6 +16,9 @@ from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 from vendors.authentication import VendorJWTAuthentication
 from rest_framework.pagination import PageNumberPagination
+from django.db import transaction
+from decimal import Decimal
+from vendors.models import VendorCommission
 
 
 class DeliveryBoyListCreateView(generics.ListCreateAPIView):
@@ -387,10 +390,6 @@ class AcceptedOrdersByVendorListView(generics.ListAPIView):
         return orders
 
 
-from django.db import transaction
-from decimal import Decimal
-from vendors.models import VendorCommission
-
 class UpdateOrderStatusView(generics.UpdateAPIView):
     queryset = OrderAssign.objects.all()
     serializer_class = OrderAssignStatusUpdateSerializer
@@ -417,78 +416,14 @@ class UpdateOrderStatusView(generics.UpdateAPIView):
         if new_status not in valid_statuses:
             return Response({"detail": "Invalid status."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Update status
         order_assign.status = new_status
         order_assign.save()
-
-        # Update main order status
-        order = order_assign.order
-        order.order_status = 'delivered' if new_status == 'DELIVERED' else order.order_status
-        order.save()
-
-        # Calculate and create commission when order is delivered
-        if new_status == 'DELIVERED':
-            self.create_vendor_commissions(order)
 
         return Response({
             "message": f"Order status updated to {new_status}.",
             "delivery_boy_id": delivery_boy_id,
             "order_id": order_id
         }, status=status.HTTP_200_OK)
-
-    @transaction.atomic
-    def create_vendor_commissions(self, order):
-        """
-        Calculate and create commission records for vendors based on delivered order items
-        """
-        from collections import defaultdict
-        
-        # Group order items by vendor
-        vendor_sales = defaultdict(Decimal)
-        
-        for item in order.order_items.all():
-            if item.status == 'cancelled':
-                continue
-                
-            # Get vendor based on product type
-            vendor = None
-            
-            if item.product_type == 'clothing':
-                try:
-                    clothing = Clothing.objects.get(id=item.product_id)
-                    vendor = clothing.vendor
-                except Clothing.DoesNotExist:
-                    continue
-                    
-            elif item.product_type == 'dish':
-                try:
-                    dish = Dish.objects.get(id=item.product_id)
-                    vendor = dish.vendor
-                except Dish.DoesNotExist:
-                    continue
-                    
-            elif item.product_type == 'grocery':
-                try:
-                    grocery = GroceryProducts.objects.get(id=item.product_id)
-                    vendor = grocery.vendor
-                except GroceryProducts.DoesNotExist:
-                    continue
-            
-            if vendor:
-                vendor_sales[vendor] += Decimal(str(item.subtotal))
-        
-        # Create commission records for each vendor
-        for vendor, total_sales in vendor_sales.items():
-            commission_percentage = vendor.commission
-            commission_amount = (total_sales * commission_percentage) / Decimal('100')
-            
-            VendorCommission.objects.create(
-                vendor=vendor,
-                total_sales=total_sales,
-                commission_percentage=commission_percentage,
-                commission_amount=commission_amount,
-                payment_status='pending'
-            )
 
 
 class DeliveryBoyOrderListView(generics.ListAPIView):
@@ -716,3 +651,119 @@ class CalculateDeliveryChargeAPIView(APIView):
                 'distance_range': f"{delivery_charge.distance_from}km - {delivery_charge.distance_to}km"
             }
         }, status=status.HTTP_200_OK)
+    
+
+
+
+class DeliverOrderView(generics.UpdateAPIView):
+    permission_classes = []
+    
+    def update(self, request, *args, **kwargs):
+        delivery_boy_id = kwargs.get('delivery_boy_id')
+        order_id = kwargs.get('order_id')
+
+        try:
+            order_assign = OrderAssign.objects.get(
+                order__order_id=order_id,
+                accepted_by__id=delivery_boy_id,
+                is_accepted=True
+            )
+        except OrderAssign.DoesNotExist:
+            return Response(
+                {"detail": "Assigned order not found or not accepted by this delivery boy."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Check if order is already delivered
+        if order_assign.status == 'DELIVERED':
+            return Response(
+                {"detail": "Order is already delivered."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Update order assignment status to DELIVERED
+        order_assign.status = 'DELIVERED'
+        order_assign.save()
+
+        # Update main order status
+        order = order_assign.order
+        order.order_status = 'delivered'
+        order.save()
+
+        # Update all order items status to delivered
+        order.order_items.exclude(status='cancelled').update(status='delivered')
+
+        # Calculate and create vendor commissions
+        commission_details = self.create_vendor_commissions(order)
+
+        return Response({
+            "message": "Order delivered successfully.",
+            "order_id": order_id,
+            "delivery_boy_id": delivery_boy_id,
+            "commissions_created": commission_details
+        }, status=status.HTTP_200_OK)
+
+    @transaction.atomic
+    def create_vendor_commissions(self, order):
+        """
+        Calculate and create commission records for vendors based on delivered order items
+        """
+        from collections import defaultdict
+        
+        # Group order items by vendor
+        vendor_sales = defaultdict(Decimal)
+        
+        for item in order.order_items.all():
+            if item.status == 'cancelled':
+                continue
+                
+            # Get vendor based on product type
+            vendor = None
+            
+            if item.product_type == 'clothing':
+                try:
+                    clothing = Clothing.objects.get(id=item.product_id)
+                    vendor = clothing.vendor
+                except Clothing.DoesNotExist:
+                    continue
+                    
+            elif item.product_type == 'dish':
+                try:
+                    dish = Dish.objects.get(id=item.product_id)
+                    vendor = dish.vendor
+                except Dish.DoesNotExist:
+                    continue
+                    
+            elif item.product_type == 'grocery':
+                try:
+                    grocery = GroceryProducts.objects.get(id=item.product_id)
+                    vendor = grocery.vendor
+                except GroceryProducts.DoesNotExist:
+                    continue
+            
+            if vendor:
+                vendor_sales[vendor] += Decimal(str(item.subtotal))
+        
+        # Create commission records for each vendor
+        commission_details = []
+        for vendor, total_sales in vendor_sales.items():
+            commission_percentage = vendor.commission
+            commission_amount = (total_sales * commission_percentage) / Decimal('100')
+            
+            commission = VendorCommission.objects.create(
+                vendor=vendor,
+                total_sales=total_sales,
+                commission_percentage=commission_percentage,
+                commission_amount=commission_amount,
+                payment_status='pending'
+            )
+            
+            commission_details.append({
+                'vendor_id': vendor.id,
+                'vendor_name': vendor.business_name,
+                'total_sales': str(total_sales),
+                'commission_percentage': str(commission_percentage),
+                'commission_amount': str(commission_amount)
+            })
+        
+        return commission_details
