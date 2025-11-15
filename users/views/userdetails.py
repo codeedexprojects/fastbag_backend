@@ -113,7 +113,7 @@ class RegisterView(APIView):
 
                 user, created = CustomUser.objects.update_or_create(
                     mobile_number=mobile_number,
-                    defaults={'otp': otp}
+                    defaults={'otp': otp,'name': name }
                 )
 
                 if created:
