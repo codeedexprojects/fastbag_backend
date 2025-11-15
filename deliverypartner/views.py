@@ -706,7 +706,6 @@ class DeliverOrderView(generics.UpdateAPIView):
             "commissions_created": commission_details
         }, status=status.HTTP_200_OK)
 
-    @transaction.atomic
     def create_vendor_commissions(self, order):
         vendor = order.order_items.first().vendor
         vendor_commission = vendor.commission
