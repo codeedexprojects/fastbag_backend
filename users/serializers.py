@@ -44,7 +44,7 @@ class RegisterSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = CustomUser
-        fields = ['mobile_number']
+        fields = ['mobile_number','name']
 
 class VerifyOTPSerializer(serializers.Serializer):
     mobile_number = serializers.CharField(max_length=15)
