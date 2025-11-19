@@ -98,7 +98,7 @@ pymysql.install_as_MySQLdb()
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
-        'NAME': 'fastbag$lastnew',
+        'NAME': 'fastbag$newdb',
         'USER': 'fastbag',
         'PASSWORD':'newpassword',
         'HOST':'fastbag.mysql.pythonanywhere-services.com',
