@@ -1168,7 +1168,7 @@ class CategorySearchAPIView(generics.ListAPIView):
 
 
 class SubCategoryListView(generics.ListAPIView):
-    queryset = SubCategory.objects.filter(is_active=True).order_by('-id')
+    queryset = SubCategory.objects.all().order_by('-id')
     serializer_class = SubCategorySerializer
     pagination_class = None
 
