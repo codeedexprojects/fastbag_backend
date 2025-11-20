@@ -806,8 +806,8 @@ from django.shortcuts import get_object_or_404
 from django.db.models import Q
 from math import radians, sin, cos, sqrt, atan2
 from decimal import Decimal
-from .models import DeliveryBoy
-from cart.models import Order, OrderAssign
+from .models import DeliveryBoy, OrderAssign
+from cart.models import Order
 from users.models import Address 
 from .serializers import DeliveryBoySerializer, OrderAssignSerializer
 
