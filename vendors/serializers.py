@@ -451,14 +451,25 @@ class VendorfavSerializer(serializers.ModelSerializer):
     def get_closing_time(self, obj):
         return obj.get_closing_time_str()
 
-
 class SubCategorySerializer(serializers.ModelSerializer):
     category_name = serializers.CharField(source='category.name', read_only=True)
-    store_type = serializers.CharField(source='category.store_type.name',read_only=True)
+    store_type = serializers.CharField(source='category.store_type.name', read_only=True)
 
     class Meta:
         model = SubCategory
-        fields = ['id', 'name', 'category', 'category_name','store_type', 'sub_category_image', 'is_active', 'created_at']
+        fields = ['id', 'name', 'category', 'category_name', 'store_type', 'sub_category_image', 'is_active', 'created_at']
+        
+    def validate(self, data):
+        if self.instance is None:
+            category = data.get('category')
+            name = data.get('name')
+            
+            if SubCategory.objects.filter(category=category, name=name).exists():
+                raise serializers.ValidationError({
+                    'non_field_errors': ['A subcategory with this name already exists in the selected category.']
+                })
+        
+        return data
 
 class SubCategoryRequestSerializer(serializers.ModelSerializer):
     category_name = serializers.CharField(source='category.name', read_only=True)
