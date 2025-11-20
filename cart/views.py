@@ -1825,10 +1825,11 @@ class VendorCheckoutView(APIView):
                     final_amount=final_amount,
                     payment_method=payment_method,
                     order_status='pending',
-                    shipping_address=address,
+                    shipping_address=str(address),
+                    address=address,
                     used_coupon=checkout.coupon_code,
                     delivery_pin=delivery_pin,
-                    product_details=product_details  # ← Now includes product_type!
+                    product_details=product_details
                 )
 
                 # Create database notifications

@@ -181,6 +181,7 @@ class Order(models.Model):
     order_status = models.CharField(max_length=20, choices=ORDER_STATUS_CHOICES, default='pending')
     delivery_charge = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
     shipping_address = models.TextField()
+    address = models.ForeignKey('users.Address', on_delete=models.SET_NULL, null=True, blank=True, related_name='orders')
     # billing_address = models.TextField()
     contact_number = models.CharField(max_length=15)
     delivery_pin = models.CharField(max_length=6, blank=True, null=True)

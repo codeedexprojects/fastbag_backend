@@ -731,6 +731,9 @@ class UserLocationSerializer(serializers.ModelSerializer):
     class Meta:
         model = UserLocation
         fields = ['latitude', 'longitude']
+
+
+
 class OrderDetailSerializer(serializers.ModelSerializer):
     """Enhanced order serializer with vendor, delivery boy, and location details"""
     # User details from the relationship
@@ -894,17 +897,18 @@ class OrderDetailSerializer(serializers.ModelSerializer):
             return None
 
     def get_user_location(self, obj):
-        """Get user location if available"""
-        try:
-            from users.models import UserLocation
-            # Get the latest user location
-            user_location = UserLocation.objects.filter(
-                user=obj.user
-            ).order_by('-id').first()
-            
-            if user_location:
-                return UserLocationSerializer(user_location).data
-            
-            return None
-        except Exception as e:
-            return None
+        """Get user location from order's address (NEW & FIXED)"""
+        # ✨ FIX: Get location from order.address instead of UserLocation model
+        if obj.address and obj.address.latitude and obj.address.longitude:
+            return {
+                'latitude': str(obj.address.latitude),
+                'longitude': str(obj.address.longitude),
+                'address_line1': obj.address.address_line1,
+                'address_line2': obj.address.address_line2,
+                'city': obj.address.city,
+                'state': obj.address.state,
+                'country': obj.address.country,
+                'pincode': obj.address.pincode,
+                'address_type': obj.address.address_type,
+            }
+        return None
