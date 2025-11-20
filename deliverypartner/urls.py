@@ -39,4 +39,18 @@ urlpatterns =[
     path('admin/delivery-charges/calculate/', CalculateDeliveryChargeAPIView.as_view(), name='calculate-delivery-charge'),
     path('delivery-boy/<int:delivery_boy_id>/order/<str:order_id>/deliver/', DeliverOrderView.as_view(), name='deliver-order'),
 
+    path('orders/<str:order_id>/available-delivery-boys/', 
+         get_available_delivery_boys_for_order, 
+         name='available-delivery-boys'),
+    
+    # Assign a delivery boy to an order
+    path('orders/<str:order_id>/assign-delivery-boy/', 
+         assign_delivery_boy_to_order, 
+         name='assign-delivery-boy'),
+    
+    # Get assigned delivery boy for an order
+    path('orders/<str:order_id>/delivery-boy/', 
+         get_order_delivery_boy, 
+         name='order-delivery-boy'),
+
 ]

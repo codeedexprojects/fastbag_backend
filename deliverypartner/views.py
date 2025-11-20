@@ -792,3 +792,326 @@ class DeliverOrderView(generics.UpdateAPIView):
         except Exception as e:
             logger.error(f"Error creating commission: {str(e)}", exc_info=True)
             return None
+        
+
+
+
+
+
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework import status
+from django.shortcuts import get_object_or_404
+from django.db.models import Q
+from math import radians, sin, cos, sqrt, atan2
+from decimal import Decimal
+from .models import DeliveryBoy
+from cart.models import Order, OrderAssign
+from users.models import Address 
+from .serializers import DeliveryBoySerializer, OrderAssignSerializer
+
+
+def calculate_distance(lat1, lon1, lat2, lon2):
+    """
+    Calculate the distance between two points on Earth using the Haversine formula.
+    Returns distance in kilometers.
+    """
+    # Convert to float for calculation
+    lat1, lon1, lat2, lon2 = map(float, [lat1, lon1, lat2, lon2])
+    
+    # Radius of Earth in kilometers
+    R = 6371.0
+    
+    # Convert coordinates to radians
+    lat1_rad = radians(lat1)
+    lon1_rad = radians(lon1)
+    lat2_rad = radians(lat2)
+    lon2_rad = radians(lon2)
+    
+    # Differences
+    dlat = lat2_rad - lat1_rad
+    dlon = lon2_rad - lon1_rad
+    
+    # Haversine formula
+    a = sin(dlat / 2)**2 + cos(lat1_rad) * cos(lat2_rad) * sin(dlon / 2)**2
+    c = 2 * atan2(sqrt(a), sqrt(1 - a))
+    
+    distance = R * c
+    return distance
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_available_delivery_boys_for_order(request, order_id):
+    """
+    Get list of available delivery boys within delivery radius of the order's address.
+    Default radius is 10km, can be customized via query parameter.
+    """
+    try:
+        # Get the order
+        order = get_object_or_404(Order, order_id=order_id)
+        
+        # Get delivery radius from query params (default: 10km)
+        delivery_radius = float(request.GET.get('radius', 10))
+        
+        # Get the order's address
+        if not order.address:
+            return Response({
+                'success': False,
+                'message': 'Order does not have an associated address'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        order_address = order.address
+        
+        # Check if address has coordinates
+        if not order_address.latitude or not order_address.longitude:
+            return Response({
+                'success': False,
+                'message': 'Order address does not have valid coordinates'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Get all active delivery boys with valid coordinates
+        all_delivery_boys = DeliveryBoy.objects.filter(
+            is_active=True,
+            latitude__isnull=False,
+            longitude__isnull=False
+        )
+        
+        # Filter delivery boys within radius
+        available_boys = []
+        for boy in all_delivery_boys:
+            distance = calculate_distance(
+                order_address.latitude,
+                order_address.longitude,
+                boy.latitude,
+                boy.longitude
+            )
+            
+            # If within radius, add to list
+            if distance <= delivery_radius:
+                boy_data = {
+                    'id': boy.id,
+                    'name': boy.name,
+                    'phone_number': boy.mobile_number,
+                    'email': boy.email,
+                    'profile_image': request.build_absolute_uri(boy.photo.url) if boy.photo else None,
+                    'vehicle_type': boy.vehicle_type,
+                    'vehicle_number': boy.vehicle_number,
+                    'place': boy.place,
+                    'current_latitude': float(boy.latitude) if boy.latitude else None,
+                    'current_longitude': float(boy.longitude) if boy.longitude else None,
+                    'distance_km': round(distance, 2),
+                    'is_available': not OrderAssign.objects.filter(
+                        delivery_boy=boy,
+                        status__in=['ASSIGNED', 'ACCEPTED', 'PICKED', 'ON_THE_WAY']
+                    ).exists()
+                }
+                available_boys.append(boy_data)
+        
+        # Sort by distance (closest first)
+        available_boys.sort(key=lambda x: x['distance_km'])
+        
+        return Response({
+            'success': True,
+            'delivery_boys': available_boys,
+            'total_count': len(available_boys),
+            'order_location': {
+                'latitude': float(order_address.latitude),
+                'longitude': float(order_address.longitude),
+                'address': str(order_address)
+            },
+            'search_radius_km': delivery_radius
+        }, status=status.HTTP_200_OK)
+        
+    except Order.DoesNotExist:
+        return Response({
+            'success': False,
+            'message': 'Order not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        return Response({
+            'success': False,
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def assign_delivery_boy_to_order(request, order_id):
+    """
+    Assign a delivery boy to an order.
+    Expected payload: {
+        "delivery_boy_id": <int>,
+        "message": <string> (optional)
+    }
+    """
+    try:
+        # Get the order
+        order = get_object_or_404(Order, order_id=order_id)
+        
+        # Get delivery boy ID from request
+        delivery_boy_id = request.data.get('delivery_boy_id')
+        notification_message = request.data.get('message', f'New order #{order_id} assigned to you')
+        
+        if not delivery_boy_id:
+            return Response({
+                'success': False,
+                'message': 'Delivery boy ID is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Get the delivery boy
+        delivery_boy = get_object_or_404(DeliveryBoy, id=delivery_boy_id, is_active=True)
+        
+        # Check if order already has an active assignment
+        existing_assignment = OrderAssign.objects.filter(
+            order=order,
+            status__in=['ASSIGNED', 'ACCEPTED', 'PICKED', 'ON_THE_WAY']
+        ).first()
+        
+        if existing_assignment:
+            return Response({
+                'success': False,
+                'message': f'Order already assigned to {existing_assignment.delivery_boy.name}'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Calculate delivery charge (you can customize this logic)
+        delivery_charge = Decimal('50.00')  # Default charge
+        
+        # If address has coordinates, calculate distance-based charge
+        if order.address and order.address.latitude and order.address.longitude:
+            if delivery_boy.latitude and delivery_boy.longitude:
+                distance = calculate_distance(
+                    order.address.latitude,
+                    order.address.longitude,
+                    delivery_boy.latitude,
+                    delivery_boy.longitude
+                )
+                # Example: ₹50 base + ₹10 per km
+                delivery_charge = Decimal('50.00') + (Decimal(str(distance)) * Decimal('10.00'))
+        
+        # Create order assignment
+        order_assign = OrderAssign.objects.create(
+            order=order,
+            delivery_boy=delivery_boy,
+            status='ASSIGNED',
+            delivery_charge=delivery_charge
+        )
+        
+        # Update order status if needed
+        if order.order_status == 'pending':
+            order.order_status = 'processing'
+            order.save()
+        
+        # TODO: Send FCM notification to delivery boy
+        # if delivery_boy.fcm_token:
+        #     send_fcm_notification(
+        #         token=delivery_boy.fcm_token,
+        #         title="New Order Assigned",
+        #         body=notification_message,
+        #         data={'order_id': order_id, 'type': 'order_assigned'}
+        #     )
+        
+        # Prepare response data
+        delivery_boy_data = {
+            'id': delivery_boy.id,
+            'name': delivery_boy.name,
+            'phone_number': delivery_boy.mobile_number,
+            'email': delivery_boy.email,
+            'profile_image': request.build_absolute_uri(delivery_boy.photo.url) if delivery_boy.photo else None,
+            'vehicle_type': delivery_boy.vehicle_type,
+            'vehicle_number': delivery_boy.vehicle_number,
+            'place': delivery_boy.place,
+            'current_latitude': float(delivery_boy.latitude) if delivery_boy.latitude else None,
+            'current_longitude': float(delivery_boy.longitude) if delivery_boy.longitude else None,
+            'is_available': False  # Now assigned
+        }
+        
+        return Response({
+            'success': True,
+            'message': f'Order successfully assigned to {delivery_boy.name}',
+            'delivery_boy': delivery_boy_data,
+            'assignment': {
+                'id': order_assign.id,
+                'assigned_at': order_assign.assigned_at,
+                'status': order_assign.status,
+                'delivery_charge': float(order_assign.delivery_charge)
+            }
+        }, status=status.HTTP_201_CREATED)
+        
+    except Order.DoesNotExist:
+        return Response({
+            'success': False,
+            'message': 'Order not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+    except DeliveryBoy.DoesNotExist:
+        return Response({
+            'success': False,
+            'message': 'Delivery boy not found or inactive'
+        }, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        return Response({
+            'success': False,
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_order_delivery_boy(request, order_id):
+    """
+    Get the assigned delivery boy for a specific order.
+    """
+    try:
+        order = get_object_or_404(Order, order_id=order_id)
+        
+        # Get active assignment
+        assignment = OrderAssign.objects.filter(
+            order=order,
+            status__in=['ASSIGNED', 'ACCEPTED', 'PICKED', 'ON_THE_WAY']
+        ).first()
+        
+        if not assignment:
+            return Response({
+                'success': True,
+                'delivery_boy': None,
+                'message': 'No delivery boy assigned to this order'
+            }, status=status.HTTP_200_OK)
+        
+        delivery_boy = assignment.delivery_boy
+        
+        delivery_boy_data = {
+            'id': delivery_boy.id,
+            'name': delivery_boy.name,
+            'phone_number': delivery_boy.mobile_number,
+            'email': delivery_boy.email,
+            'profile_image': request.build_absolute_uri(delivery_boy.photo.url) if delivery_boy.photo else None,
+            'vehicle_type': delivery_boy.vehicle_type,
+            'vehicle_number': delivery_boy.vehicle_number,
+            'place': delivery_boy.place,
+            'current_latitude': float(delivery_boy.latitude) if delivery_boy.latitude else None,
+            'current_longitude': float(delivery_boy.longitude) if delivery_boy.longitude else None,
+            'is_available': False,
+            'assignment': {
+                'id': assignment.id,
+                'assigned_at': assignment.assigned_at,
+                'status': assignment.status,
+                'delivery_charge': float(assignment.delivery_charge)
+            }
+        }
+        
+        return Response({
+            'success': True,
+            'delivery_boy': delivery_boy_data
+        }, status=status.HTTP_200_OK)
+        
+    except Order.DoesNotExist:
+        return Response({
+            'success': False,
+            'message': 'Order not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        return Response({
+            'success': False,
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

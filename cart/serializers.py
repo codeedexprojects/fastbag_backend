@@ -897,8 +897,6 @@ class OrderDetailSerializer(serializers.ModelSerializer):
             return None
 
     def get_user_location(self, obj):
-        """Get user location from order's address (NEW & FIXED)"""
-        # ✨ FIX: Get location from order.address instead of UserLocation model
         if obj.address and obj.address.latitude and obj.address.longitude:
             return {
                 'latitude': str(obj.address.latitude),
