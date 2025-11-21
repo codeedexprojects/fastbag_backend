@@ -846,11 +846,10 @@ def calculate_distance(lat1, lon1, lat2, lon2):
 def get_available_delivery_boys_for_order(request, order_id):
     """
     Get list of available delivery boys whose service radius covers the order's delivery location.
-    Standard delivery app logic: Find delivery boys where the order location falls within their service area.
     """
     try:
-        # Get the order
-        order = get_object_or_404(Order, order_id=order_id)
+        # Change this line - use database ID instead of order_id field
+        order = get_object_or_404(Order, id=order_id)  # ✅ Changed from order_id=order_id
         
         # Get the order's delivery address
         if not order.address:
@@ -884,9 +883,9 @@ def get_available_delivery_boys_for_order(request, order_id):
         for boy in all_delivery_boys:
             # Calculate distance from delivery boy's base location to order delivery location
             distance = calculate_distance(
-                float(boy.latitude),      # Delivery boy's base location
+                float(boy.latitude),
                 float(boy.longitude),
-                order_lat,                 # Order's delivery location
+                order_lat,
                 order_lon
             )
             
@@ -894,7 +893,7 @@ def get_available_delivery_boys_for_order(request, order_id):
             service_radius = float(boy.radius_km)
             
             if distance <= service_radius:
-                # Check if delivery boy is currently available (not assigned to active orders)
+                # Check if delivery boy is currently available
                 is_currently_available = not OrderAssign.objects.filter(
                     delivery_boy=boy,
                     status__in=['ASSIGNED', 'ACCEPTED', 'PICKED', 'ON_THE_WAY']
