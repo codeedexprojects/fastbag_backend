@@ -283,7 +283,7 @@ class VendorDetailSerializer(serializers.ModelSerializer):
             'store_type', 'store_type_name', 'opening_time', 'closing_time', 'license', 
             'license_url', 'is_approved', 'is_active', 'created_at', 'is_restaurent', 
             'is_Grocery', 'alternate_email', 'since', 'longitude', 'latitude', 'is_closed',
-            'is_closed_now', 'is_favourite', 'id_proof', 'is_fashion', 'commission'
+            'is_closed_now', 'is_favourite', 'id_proof', 'is_fashion', 'commission','passbook_image'
         ]
         read_only_fields = ['id', 'store_id', 'created_at', 'is_approved']
 
