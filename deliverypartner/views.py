@@ -806,7 +806,6 @@ from django.shortcuts import get_object_or_404
 from django.db.models import Q
 from math import radians, sin, cos, sqrt, atan2
 from decimal import Decimal
-import requests
 from .models import DeliveryBoy, OrderAssign
 from cart.models import Order
 from users.models import Address 
@@ -842,161 +841,34 @@ def calculate_distance(lat1, lon1, lat2, lon2):
     return distance
 
 
-def get_place_name_from_coordinates(lat, lon):
-    """
-    Get place name from coordinates using reverse geocoding.
-    This helps verify that coordinates are correct by showing what location they represent.
-    """
-    try:
-        # Using OpenStreetMap Nominatim API (free, no API key needed)
-        url = f"https://nominatim.openstreetmap.org/reverse?format=json&lat={lat}&lon={lon}&zoom=10"
-        headers = {
-            'User-Agent': 'FastBagDeliveryApp/1.0'
-        }
-        response = requests.get(url, headers=headers, timeout=3)
-        
-        if response.status_code == 200:
-            data = response.json()
-            address = data.get('address', {})
-            display_name = data.get('display_name', 'Unknown Location')
-            
-            # Extract relevant parts
-            city = address.get('city') or address.get('town') or address.get('village') or address.get('county')
-            state = address.get('state')
-            country = address.get('country')
-            
-            place_info = {
-                'full_name': display_name,
-                'city': city,
-                'state': state,
-                'country': country,
-                'verified': True
-            }
-            return place_info
-        else:
-            return {
-                'full_name': 'Unable to verify location',
-                'verified': False,
-                'error': f'Geocoding API returned status {response.status_code}'
-            }
-    except Exception as e:
-        return {
-            'full_name': 'Unable to verify location',
-            'verified': False,
-            'error': str(e)
-        }
-
-
-def validate_coordinates(lat, lon, label="Location"):
-    """
-    Validate coordinates and return detailed info about them.
-    """
-    validation = {
-        'label': label,
-        'latitude': str(lat) if lat else 'NULL',
-        'longitude': str(lon) if lon else 'NULL',
-        'is_valid': False,
-        'issues': []
-    }
-    
-    if lat is None or lon is None:
-        validation['issues'].append('Coordinates are NULL/None')
-        return validation
-    
-    try:
-        lat_float = float(lat)
-        lon_float = float(lon)
-        
-        validation['latitude_float'] = lat_float
-        validation['longitude_float'] = lon_float
-        
-        # Check valid ranges
-        if lat_float < -90 or lat_float > 90:
-            validation['issues'].append(f'Latitude {lat_float} is out of valid range (-90 to 90)')
-        
-        if lon_float < -180 or lon_float > 180:
-            validation['issues'].append(f'Longitude {lon_float} is out of valid range (-180 to 180)')
-        
-        # Check if coordinates are at 0,0 (likely unset)
-        if lat_float == 0 and lon_float == 0:
-            validation['issues'].append('Coordinates are at 0,0 - likely not set properly')
-        
-        if not validation['issues']:
-            validation['is_valid'] = True
-            # Get actual place name for these coordinates
-            place_info = get_place_name_from_coordinates(lat_float, lon_float)
-            validation['actual_location'] = place_info
-        
-    except (ValueError, TypeError) as e:
-        validation['issues'].append(f'Cannot convert to float: {str(e)}')
-    
-    return validation
-
-
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_available_delivery_boys_for_order(request, order_id):
     """
-    Get list of available delivery boys whose service radius covers the order's address.
-    Enhanced with coordinate verification and reverse geocoding for debugging.
+    Get list of available delivery boys whose service radius covers the order's delivery location.
+    Standard delivery app logic: Find delivery boys where the order location falls within their service area.
     """
     try:
         # Get the order
         order = get_object_or_404(Order, order_id=order_id)
         
-        print(f"\n{'='*80}")
-        print(f"DEBUG: Getting delivery boys for Order ID: {order_id}")
-        print(f"{'='*80}\n")
-        
-        # Get the order's address
+        # Get the order's delivery address
         if not order.address:
             return Response({
                 'success': False,
-                'message': 'Order does not have an associated address',
-                'debug': {
-                    'order_id': order_id,
-                    'has_address': False
-                }
+                'message': 'Order does not have an associated address'
             }, status=status.HTTP_400_BAD_REQUEST)
         
         order_address = order.address
         
-        # Validate order address coordinates
-        order_coord_validation = validate_coordinates(
-            order_address.latitude, 
-            order_address.longitude,
-            "Order Delivery Address"
-        )
-        
-        print(f"📍 ORDER ADDRESS COORDINATES:")
-        print(f"   Latitude: {order_coord_validation['latitude']}")
-        print(f"   Longitude: {order_coord_validation['longitude']}")
-        print(f"   Is Valid: {order_coord_validation['is_valid']}")
-        if order_coord_validation.get('actual_location'):
-            print(f"   Actual Location: {order_coord_validation['actual_location']['full_name']}")
-        if order_coord_validation['issues']:
-            print(f"   ⚠️  Issues: {', '.join(order_coord_validation['issues'])}")
-        print()
-        
-        # Check if address has valid coordinates
-        if not order_coord_validation['is_valid']:
+        # Check if address has coordinates
+        if not order_address.latitude or not order_address.longitude:
             return Response({
                 'success': False,
-                'message': 'Order address does not have valid coordinates',
-                'debug': {
-                    'order_id': order_id,
-                    'has_address': True,
-                    'address_stored_in_db': {
-                        'full_address': str(order_address),
-                        'city': getattr(order_address, 'city', 'N/A'),
-                        'state': getattr(order_address, 'state', 'N/A'),
-                        'pincode': getattr(order_address, 'pincode', 'N/A'),
-                    },
-                    'coordinate_validation': order_coord_validation
-                }
+                'message': 'Order address does not have valid coordinates'
             }, status=status.HTTP_400_BAD_REQUEST)
         
-        # Get all active delivery boys with valid coordinates
+        # Get all active delivery boys with valid coordinates and radius
         all_delivery_boys = DeliveryBoy.objects.filter(
             is_active=True,
             latitude__isnull=False,
@@ -1004,85 +876,29 @@ def get_available_delivery_boys_for_order(request, order_id):
             radius_km__isnull=False
         )
         
-        total_active_boys = all_delivery_boys.count()
-        print(f"🚴 TOTAL ACTIVE DELIVERY BOYS IN SYSTEM: {total_active_boys}\n")
-        
-        # Validate each delivery boy's coordinates and check distance
+        # Filter delivery boys whose service area covers the order location
         available_boys = []
-        excluded_boys_details = []
+        order_lat = float(order_address.latitude)
+        order_lon = float(order_address.longitude)
         
-        for idx, boy in enumerate(all_delivery_boys, 1):
-            print(f"{'─'*80}")
-            print(f"Delivery Boy #{idx}: {boy.name} (ID: {boy.id})")
-            print(f"{'─'*80}")
-            
-            # Validate delivery boy coordinates
-            boy_coord_validation = validate_coordinates(
-                boy.latitude,
-                boy.longitude,
-                f"Delivery Boy Base Location"
+        for boy in all_delivery_boys:
+            # Calculate distance from delivery boy's base location to order delivery location
+            distance = calculate_distance(
+                float(boy.latitude),      # Delivery boy's base location
+                float(boy.longitude),
+                order_lat,                 # Order's delivery location
+                order_lon
             )
             
-            print(f"📍 Base Location Coordinates:")
-            print(f"   Stored Place Name: {boy.place}")
-            print(f"   Latitude: {boy_coord_validation['latitude']}")
-            print(f"   Longitude: {boy_coord_validation['longitude']}")
-            print(f"   Is Valid: {boy_coord_validation['is_valid']}")
+            # Check if order delivery location is within delivery boy's service radius
+            service_radius = float(boy.radius_km)
             
-            if boy_coord_validation.get('actual_location'):
-                actual_loc = boy_coord_validation['actual_location']
-                print(f"   ✓ Verified Location: {actual_loc['full_name']}")
-                if actual_loc.get('city'):
-                    print(f"   ✓ City: {actual_loc['city']}")
-                if actual_loc.get('state'):
-                    print(f"   ✓ State: {actual_loc['state']}")
-            
-            if boy_coord_validation['issues']:
-                print(f"   ⚠️  Issues: {', '.join(boy_coord_validation['issues'])}")
-            
-            print(f"\n📏 Service Radius: {boy.radius_km} km")
-            
-            if not boy_coord_validation['is_valid']:
-                print(f"   ❌ EXCLUDED: Invalid coordinates\n")
-                excluded_boys_details.append({
-                    'id': boy.id,
-                    'name': boy.name,
-                    'stored_place': boy.place,
-                    'coordinate_validation': boy_coord_validation,
-                    'exclusion_reason': 'Invalid coordinates',
-                    'service_radius_km': float(boy.radius_km) if boy.radius_km else None
-                })
-                continue
-            
-            # Calculate distance
-            try:
-                distance = calculate_distance(
-                    boy.latitude,
-                    boy.longitude,
-                    order_address.latitude,
-                    order_address.longitude
-                )
-                
-                service_radius = float(boy.radius_km)
-                is_within_radius = distance <= service_radius
-                
-                print(f"\n📐 Distance Calculation:")
-                print(f"   From: {boy_coord_validation.get('actual_location', {}).get('full_name', boy.place)}")
-                print(f"   To: {order_coord_validation.get('actual_location', {}).get('full_name', 'Order location')}")
-                print(f"   Distance: {round(distance, 2)} km")
-                print(f"   Within Radius: {'✓ YES' if is_within_radius else '✗ NO'}")
-                
-                if not is_within_radius:
-                    print(f"   Exceeds by: {round(distance - service_radius, 2)} km")
-                
-                # Check if delivery boy has active assignment
-                has_active_assignment = OrderAssign.objects.filter(
+            if distance <= service_radius:
+                # Check if delivery boy is currently available (not assigned to active orders)
+                is_currently_available = not OrderAssign.objects.filter(
                     delivery_boy=boy,
                     status__in=['ASSIGNED', 'ACCEPTED', 'PICKED', 'ON_THE_WAY']
                 ).exists()
-                
-                if has_active_assignment:
-                    print(f"   ⚠️  Currently has active delivery assignment")
                 
                 boy_data = {
                     'id': boy.id,
@@ -1092,100 +908,38 @@ def get_available_delivery_boys_for_order(request, order_id):
                     'profile_image': request.build_absolute_uri(boy.photo.url) if boy.photo else None,
                     'vehicle_type': boy.vehicle_type,
                     'vehicle_number': boy.vehicle_number,
-                    'stored_place': boy.place,
-                    'verified_location': boy_coord_validation.get('actual_location', {}).get('full_name'),
+                    'place': boy.place,
                     'base_latitude': float(boy.latitude),
                     'base_longitude': float(boy.longitude),
                     'service_radius_km': service_radius,
-                    'distance_from_base_to_order_km': round(distance, 2),
-                    'is_within_service_radius': is_within_radius,
-                    'has_active_assignment': has_active_assignment,
-                    'is_available': not has_active_assignment and is_within_radius,
-                    'coordinate_validation': boy_coord_validation
+                    'distance_to_delivery_location_km': round(distance, 2),
+                    'is_available': is_currently_available
                 }
-                
-                if is_within_radius and not has_active_assignment:
-                    print(f"\n   ✅ AVAILABLE FOR ASSIGNMENT")
-                    available_boys.append(boy_data)
-                else:
-                    exclusion_reasons = []
-                    if not is_within_radius:
-                        exclusion_reasons.append(f'Outside service radius by {round(distance - service_radius, 2)} km')
-                    if has_active_assignment:
-                        exclusion_reasons.append('Currently has active assignment')
-                    
-                    print(f"\n   ❌ EXCLUDED: {'; '.join(exclusion_reasons)}")
-                    boy_data['exclusion_reason'] = '; '.join(exclusion_reasons)
-                    excluded_boys_details.append(boy_data)
-                
-                print()
-                
-            except Exception as calc_error:
-                print(f"   ❌ ERROR calculating distance: {str(calc_error)}\n")
-                excluded_boys_details.append({
-                    'id': boy.id,
-                    'name': boy.name,
-                    'stored_place': boy.place,
-                    'coordinate_validation': boy_coord_validation,
-                    'error': str(calc_error),
-                    'exclusion_reason': 'Distance calculation failed'
-                })
+                available_boys.append(boy_data)
         
-        # Sort available boys by distance (closest first)
-        available_boys.sort(key=lambda x: x['distance_from_base_to_order_km'])
-        
-        print(f"{'='*80}")
-        print(f"SUMMARY:")
-        print(f"  Total Active Delivery Boys: {total_active_boys}")
-        print(f"  Available for this order: {len(available_boys)}")
-        print(f"  Excluded: {len(excluded_boys_details)}")
-        print(f"{'='*80}\n")
+        # Sort by distance (closest delivery boys first)
+        available_boys.sort(key=lambda x: x['distance_to_delivery_location_km'])
         
         return Response({
             'success': True,
             'delivery_boys': available_boys,
             'total_count': len(available_boys),
-            'order_location': {
-                'stored_address': str(order_address),
-                'stored_city': getattr(order_address, 'city', 'N/A'),
-                'stored_state': getattr(order_address, 'state', 'N/A'),
-                'stored_pincode': getattr(order_address, 'pincode', 'N/A'),
-                'latitude': float(order_address.latitude),
-                'longitude': float(order_address.longitude),
-                'verified_location': order_coord_validation.get('actual_location', {}).get('full_name'),
-                'verified_city': order_coord_validation.get('actual_location', {}).get('city'),
-                'verified_state': order_coord_validation.get('actual_location', {}).get('state'),
-                'coordinate_validation': order_coord_validation
-            },
-            'debug_summary': {
-                'total_active_delivery_boys_in_system': total_active_boys,
-                'delivery_boys_available': len(available_boys),
-                'delivery_boys_excluded': len(excluded_boys_details),
-                'excluded_delivery_boys': excluded_boys_details
+            'order_delivery_location': {
+                'latitude': order_lat,
+                'longitude': order_lon,
+                'address': str(order_address)
             }
         }, status=status.HTTP_200_OK)
         
     except Order.DoesNotExist:
         return Response({
             'success': False,
-            'message': 'Order not found',
-            'debug': {
-                'order_id_searched': order_id,
-                'order_exists': False
-            }
+            'message': 'Order not found'
         }, status=status.HTTP_404_NOT_FOUND)
     except Exception as e:
-        import traceback
-        print(f"\n❌ ERROR: {str(e)}")
-        print(traceback.format_exc())
         return Response({
             'success': False,
-            'message': str(e),
-            'debug': {
-                'error_type': type(e).__name__,
-                'error_message': str(e),
-                'traceback': traceback.format_exc()
-            }
+            'message': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -1195,9 +949,16 @@ def assign_delivery_boy_to_order(request, order_id):
     """
     Assign a delivery boy to an order.
     Validates that the order location is within the delivery boy's service radius.
+    Expected payload: {
+        "delivery_boy_id": <int>,
+        "message": <string> (optional)
+    }
     """
     try:
+        # Get the order
         order = get_object_or_404(Order, order_id=order_id)
+        
+        # Get delivery boy ID from request
         delivery_boy_id = request.data.get('delivery_boy_id')
         notification_message = request.data.get('message', f'New order #{order_id} assigned to you')
         
@@ -1207,70 +968,26 @@ def assign_delivery_boy_to_order(request, order_id):
                 'message': 'Delivery boy ID is required'
             }, status=status.HTTP_400_BAD_REQUEST)
         
+        # Get the delivery boy
         delivery_boy = get_object_or_404(DeliveryBoy, id=delivery_boy_id, is_active=True)
         
-        # Validate coordinates
-        order_coord = validate_coordinates(
-            order.address.latitude if order.address else None,
-            order.address.longitude if order.address else None,
-            "Order Address"
-        )
+        # Validate that order location is within delivery boy's service radius
+        if order.address and order.address.latitude and order.address.longitude:
+            if delivery_boy.latitude and delivery_boy.longitude and delivery_boy.radius_km:
+                distance = calculate_distance(
+                    delivery_boy.latitude,
+                    delivery_boy.longitude,
+                    order.address.latitude,
+                    order.address.longitude
+                )
+                
+                if distance > float(delivery_boy.radius_km):
+                    return Response({
+                        'success': False,
+                        'message': f'Order location is outside delivery boy\'s service radius. Distance: {round(distance, 2)}km, Service Radius: {float(delivery_boy.radius_km)}km'
+                    }, status=status.HTTP_400_BAD_REQUEST)
         
-        boy_coord = validate_coordinates(
-            delivery_boy.latitude,
-            delivery_boy.longitude,
-            "Delivery Boy Base"
-        )
-        
-        if not order_coord['is_valid']:
-            return Response({
-                'success': False,
-                'message': 'Order address has invalid coordinates',
-                'debug': {
-                    'order_coordinate_validation': order_coord
-                }
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        if not boy_coord['is_valid']:
-            return Response({
-                'success': False,
-                'message': 'Delivery boy has invalid base location coordinates',
-                'debug': {
-                    'delivery_boy_coordinate_validation': boy_coord
-                }
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        # Calculate distance
-        distance = calculate_distance(
-            delivery_boy.latitude,
-            delivery_boy.longitude,
-            order.address.latitude,
-            order.address.longitude
-        )
-        
-        service_radius = float(delivery_boy.radius_km)
-        
-        if distance > service_radius:
-            return Response({
-                'success': False,
-                'message': f'Order location is outside delivery boy\'s service radius',
-                'debug': {
-                    'delivery_boy': {
-                        'name': delivery_boy.name,
-                        'base_location': boy_coord.get('actual_location', {}).get('full_name'),
-                        'coordinates': f"{boy_coord['latitude']}, {boy_coord['longitude']}",
-                        'service_radius_km': service_radius
-                    },
-                    'order': {
-                        'location': order_coord.get('actual_location', {}).get('full_name'),
-                        'coordinates': f"{order_coord['latitude']}, {order_coord['longitude']}"
-                    },
-                    'distance_km': round(distance, 2),
-                    'exceeds_by_km': round(distance - service_radius, 2)
-                }
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        # Check existing assignment
+        # Check if order already has an active assignment
         existing_assignment = OrderAssign.objects.filter(
             order=order,
             status__in=['ASSIGNED', 'ACCEPTED', 'PICKED', 'ON_THE_WAY']
@@ -1282,8 +999,19 @@ def assign_delivery_boy_to_order(request, order_id):
                 'message': f'Order already assigned to {existing_assignment.delivery_boy.name}'
             }, status=status.HTTP_400_BAD_REQUEST)
         
-        # Calculate delivery charge
-        delivery_charge = Decimal('50.00') + (Decimal(str(distance)) * Decimal('10.00'))
+        # Calculate delivery charge based on distance
+        delivery_charge = Decimal('50.00')  # Base charge
+        
+        if order.address and order.address.latitude and order.address.longitude:
+            if delivery_boy.latitude and delivery_boy.longitude:
+                distance = calculate_distance(
+                    delivery_boy.latitude,
+                    delivery_boy.longitude,
+                    order.address.latitude,
+                    order.address.longitude
+                )
+                # Base ₹50 + ₹10 per km
+                delivery_charge = Decimal('50.00') + (Decimal(str(distance)) * Decimal('10.00'))
         
         # Create order assignment
         order_assign = OrderAssign.objects.create(
@@ -1293,44 +1021,62 @@ def assign_delivery_boy_to_order(request, order_id):
             delivery_charge=delivery_charge
         )
         
-        # Update order status
+        # Update order status if needed
         if order.order_status == 'pending':
             order.order_status = 'processing'
             order.save()
         
+        # TODO: Send FCM notification to delivery boy
+        # if delivery_boy.fcm_token:
+        #     send_fcm_notification(
+        #         token=delivery_boy.fcm_token,
+        #         title="New Order Assigned",
+        #         body=notification_message,
+        #         data={'order_id': order_id, 'type': 'order_assigned'}
+        #     )
+        
+        # Prepare response data
+        delivery_boy_data = {
+            'id': delivery_boy.id,
+            'name': delivery_boy.name,
+            'phone_number': delivery_boy.mobile_number,
+            'email': delivery_boy.email,
+            'profile_image': request.build_absolute_uri(delivery_boy.photo.url) if delivery_boy.photo else None,
+            'vehicle_type': delivery_boy.vehicle_type,
+            'vehicle_number': delivery_boy.vehicle_number,
+            'place': delivery_boy.place,
+            'base_latitude': float(delivery_boy.latitude) if delivery_boy.latitude else None,
+            'base_longitude': float(delivery_boy.longitude) if delivery_boy.longitude else None,
+            'service_radius_km': float(delivery_boy.radius_km) if delivery_boy.radius_km else None,
+            'is_available': False  # Now assigned
+        }
+        
         return Response({
             'success': True,
             'message': f'Order successfully assigned to {delivery_boy.name}',
+            'delivery_boy': delivery_boy_data,
             'assignment': {
                 'id': order_assign.id,
                 'assigned_at': order_assign.assigned_at,
                 'status': order_assign.status,
                 'delivery_charge': float(order_assign.delivery_charge)
-            },
-            'delivery_boy': {
-                'id': delivery_boy.id,
-                'name': delivery_boy.name,
-                'phone_number': delivery_boy.mobile_number,
-                'base_location': boy_coord.get('actual_location', {}).get('full_name'),
-                'distance_to_order_km': round(distance, 2)
-            },
-            'debug': {
-                'order_location': order_coord.get('actual_location', {}).get('full_name'),
-                'delivery_boy_location': boy_coord.get('actual_location', {}).get('full_name'),
-                'distance_km': round(distance, 2),
-                'service_radius_km': service_radius
             }
         }, status=status.HTTP_201_CREATED)
         
-    except Exception as e:
-        import traceback
+    except Order.DoesNotExist:
         return Response({
             'success': False,
-            'message': str(e),
-            'debug': {
-                'error': str(e),
-                'traceback': traceback.format_exc()
-            }
+            'message': 'Order not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+    except DeliveryBoy.DoesNotExist:
+        return Response({
+            'success': False,
+            'message': 'Delivery boy not found or inactive'
+        }, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        return Response({
+            'success': False,
+            'message': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -1343,6 +1089,7 @@ def get_order_delivery_boy(request, order_id):
     try:
         order = get_object_or_404(Order, order_id=order_id)
         
+        # Get active assignment
         assignment = OrderAssign.objects.filter(
             order=order,
             status__in=['ASSIGNED', 'ACCEPTED', 'PICKED', 'ON_THE_WAY']
@@ -1357,13 +1104,6 @@ def get_order_delivery_boy(request, order_id):
         
         delivery_boy = assignment.delivery_boy
         
-        # Validate coordinates
-        boy_coord = validate_coordinates(
-            delivery_boy.latitude,
-            delivery_boy.longitude,
-            "Delivery Boy"
-        )
-        
         delivery_boy_data = {
             'id': delivery_boy.id,
             'name': delivery_boy.name,
@@ -1372,11 +1112,11 @@ def get_order_delivery_boy(request, order_id):
             'profile_image': request.build_absolute_uri(delivery_boy.photo.url) if delivery_boy.photo else None,
             'vehicle_type': delivery_boy.vehicle_type,
             'vehicle_number': delivery_boy.vehicle_number,
-            'stored_place': delivery_boy.place,
-            'verified_location': boy_coord.get('actual_location', {}).get('full_name'),
+            'place': delivery_boy.place,
             'base_latitude': float(delivery_boy.latitude) if delivery_boy.latitude else None,
             'base_longitude': float(delivery_boy.longitude) if delivery_boy.longitude else None,
             'service_radius_km': float(delivery_boy.radius_km) if delivery_boy.radius_km else None,
+            'is_available': False,
             'assignment': {
                 'id': assignment.id,
                 'assigned_at': assignment.assigned_at,
@@ -1390,6 +1130,11 @@ def get_order_delivery_boy(request, order_id):
             'delivery_boy': delivery_boy_data
         }, status=status.HTTP_200_OK)
         
+    except Order.DoesNotExist:
+        return Response({
+            'success': False,
+            'message': 'Order not found'
+        }, status=status.HTTP_404_NOT_FOUND)
     except Exception as e:
         return Response({
             'success': False,
