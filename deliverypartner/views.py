@@ -849,7 +849,7 @@ def get_available_delivery_boys_for_order(request, order_id):
     """
     try:
         # Change this line - use database ID instead of order_id field
-        order = get_object_or_404(Order, id=order_id)  # ✅ Changed from order_id=order_id
+        order = get_object_or_404(Order, id=order_id) 
         
         # Get the order's delivery address
         if not order.address:
@@ -955,7 +955,7 @@ def assign_delivery_boy_to_order(request, order_id):
     """
     try:
         # Get the order
-        order = get_object_or_404(Order, order_id=order_id)
+        order = get_object_or_404(Order, id=order_id)
         
         # Get delivery boy ID from request
         delivery_boy_id = request.data.get('delivery_boy_id')
@@ -1086,7 +1086,7 @@ def get_order_delivery_boy(request, order_id):
     Get the assigned delivery boy for a specific order.
     """
     try:
-        order = get_object_or_404(Order, order_id=order_id)
+        order = get_object_or_404(Order, id=order_id)
         
         # Get active assignment
         assignment = OrderAssign.objects.filter(
