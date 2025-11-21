@@ -1579,21 +1579,26 @@ class UserCarouselByLocationView(generics.ListAPIView):
                 user_lat = float(user_lat)
                 user_lon = float(user_lon)
                 
-                # Filter and calculate distances
                 relevant_carousels = []
-                for carousel in queryset:
-                    if carousel.latitude and carousel.longitude:
-                        distance = self.calculate_distance(
-                            user_lat, user_lon,
-                            carousel.latitude, carousel.longitude
-                        )
-                        
-                        # Check if user is within the carousel's radius
-                        if carousel.radius_km == 0 or distance <= carousel.radius_km:
-                            carousel.distance = round(distance, 2)
-                            relevant_carousels.append(carousel)
                 
-                # Sort by distance
+                for carousel in queryset:
+                    if carousel.location_type == 'district':
+                        carousel.distance = 0 
+                        relevant_carousels.append(carousel)
+                    
+                    elif carousel.location_type in ['point', 'radius']:
+                        if carousel.latitude and carousel.longitude:
+                            distance = self.calculate_distance(
+                                user_lat, user_lon,
+                                carousel.latitude, carousel.longitude
+                            )
+                        
+                            max_distance = carousel.radius_km if carousel.radius_km > 0 else 1
+                            
+                            if distance <= max_distance:
+                                carousel.distance = round(distance, 2)
+                                relevant_carousels.append(carousel)
+                
                 relevant_carousels.sort(key=lambda x: x.distance)
                 return relevant_carousels
                 
@@ -1630,7 +1635,7 @@ class AdsCarouselDetailView(generics.RetrieveUpdateDestroyAPIView):
     permission_classes = [IsAdminUser]
     queryset = AppCarouselByLocation.objects.all()
     serializer_class = AppCarouselSerializerByLoc
-    lookup_field = "id"
+    lookup_field = "pk"
 
 class AdsCarouselListViewUserLoc(generics.ListAPIView):
     permission_classes = []
