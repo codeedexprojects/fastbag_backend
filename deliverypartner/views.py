@@ -846,29 +846,60 @@ def calculate_distance(lat1, lon1, lat2, lon2):
 def get_available_delivery_boys_for_order(request, order_id):
     """
     Get list of available delivery boys whose service radius covers the order's address.
-    Filters delivery boys based on:
-    1. Distance from their base location to order address <= their service radius
-    2. Active status
-    3. Valid coordinates
+    Enhanced with detailed debugging information.
     """
     try:
         # Get the order
         order = get_object_or_404(Order, order_id=order_id)
         
+        # Debug info - Order details
+        debug_info = {
+            'order_id': order.order_id,
+            'order_status': order.order_status,
+            'order_created_at': str(order.created_at),
+        }
+        
         # Get the order's address
         if not order.address:
             return Response({
                 'success': False,
-                'message': 'Order does not have an associated address'
+                'message': 'Order does not have an associated address',
+                'debug_info': {
+                    **debug_info,
+                    'address_exists': False,
+                    'address_object': None
+                }
             }, status=status.HTTP_400_BAD_REQUEST)
         
         order_address = order.address
+        
+        # Enhanced debug info - Address details
+        address_debug = {
+            'address_id': order_address.id if hasattr(order_address, 'id') else 'N/A',
+            'address_full': str(order_address),
+            'address_line1': getattr(order_address, 'address_line1', 'N/A'),
+            'address_line2': getattr(order_address, 'address_line2', 'N/A'),
+            'city': getattr(order_address, 'city', 'N/A'),
+            'state': getattr(order_address, 'state', 'N/A'),
+            'pincode': getattr(order_address, 'pincode', 'N/A'),
+            'country': getattr(order_address, 'country', 'N/A'),
+            'latitude': str(order_address.latitude) if order_address.latitude else None,
+            'longitude': str(order_address.longitude) if order_address.longitude else None,
+            'latitude_type': str(type(order_address.latitude)),
+            'longitude_type': str(type(order_address.longitude)),
+        }
         
         # Check if address has coordinates
         if not order_address.latitude or not order_address.longitude:
             return Response({
                 'success': False,
-                'message': 'Order address does not have valid coordinates'
+                'message': 'Order address does not have valid coordinates',
+                'debug_info': {
+                    **debug_info,
+                    'address_exists': True,
+                    'coordinates_valid': False,
+                    'address_details': address_debug
+                }
             }, status=status.HTTP_400_BAD_REQUEST)
         
         # Get all active delivery boys with valid coordinates
@@ -879,27 +910,34 @@ def get_available_delivery_boys_for_order(request, order_id):
             radius_km__isnull=False
         )
         
+        # Debug info - Delivery boys count
+        total_active_delivery_boys = all_delivery_boys.count()
+        
         # Filter delivery boys whose service radius covers the order location
         available_boys = []
+        excluded_boys = []  # For debugging - boys who are out of range
+        
         for boy in all_delivery_boys:
             # Calculate distance from delivery boy's base location to order location
-            distance = calculate_distance(
-                boy.latitude,  # Delivery boy's base location
-                boy.longitude,
-                order_address.latitude,  # Order location
-                order_address.longitude
-            )
-            
-            # Check if order location is within delivery boy's service radius
-            service_radius = float(boy.radius_km)
-            if distance <= service_radius:
+            try:
+                distance = calculate_distance(
+                    boy.latitude,  # Delivery boy's base location
+                    boy.longitude,
+                    order_address.latitude,  # Order location
+                    order_address.longitude
+                )
+                
+                # Check if order location is within delivery boy's service radius
+                service_radius = float(boy.radius_km)
+                is_within_radius = distance <= service_radius
+                
                 # Check if delivery boy is currently available
-                is_currently_available = not OrderAssign.objects.filter(
+                has_active_assignment = OrderAssign.objects.filter(
                     delivery_boy=boy,
                     status__in=['ASSIGNED', 'ACCEPTED', 'PICKED', 'ON_THE_WAY']
                 ).exists()
                 
-                boy_data = {
+                boy_info = {
                     'id': boy.id,
                     'name': boy.name,
                     'phone_number': boy.mobile_number,
@@ -912,9 +950,26 @@ def get_available_delivery_boys_for_order(request, order_id):
                     'base_longitude': float(boy.longitude),
                     'service_radius_km': service_radius,
                     'distance_from_base_to_order_km': round(distance, 2),
-                    'is_available': is_currently_available
+                    'is_within_service_radius': is_within_radius,
+                    'has_active_assignment': has_active_assignment,
+                    'is_available': not has_active_assignment and is_within_radius
                 }
-                available_boys.append(boy_data)
+                
+                if is_within_radius:
+                    available_boys.append(boy_info)
+                else:
+                    excluded_boys.append({
+                        **boy_info,
+                        'exclusion_reason': f'Outside service radius by {round(distance - service_radius, 2)} km'
+                    })
+                    
+            except Exception as calc_error:
+                excluded_boys.append({
+                    'id': boy.id,
+                    'name': boy.name,
+                    'error': str(calc_error),
+                    'exclusion_reason': 'Distance calculation failed'
+                })
         
         # Sort by distance (closest first)
         available_boys.sort(key=lambda x: x['distance_from_base_to_order_km'])
@@ -926,19 +981,42 @@ def get_available_delivery_boys_for_order(request, order_id):
             'order_location': {
                 'latitude': float(order_address.latitude),
                 'longitude': float(order_address.longitude),
-                'address': str(order_address)
+                'address': str(order_address),
+                'full_address_details': address_debug
+            },
+            'debug_info': {
+                'order_details': debug_info,
+                'total_active_delivery_boys_in_system': total_active_delivery_boys,
+                'delivery_boys_within_radius': len(available_boys),
+                'delivery_boys_excluded': len(excluded_boys),
+                'excluded_delivery_boys': excluded_boys,  # Show why they were excluded
+                'coordinates_used_for_calculation': {
+                    'order_lat': float(order_address.latitude),
+                    'order_lon': float(order_address.longitude),
+                    'order_place': address_debug.get('city', 'Unknown')
+                }
             }
         }, status=status.HTTP_200_OK)
         
     except Order.DoesNotExist:
         return Response({
             'success': False,
-            'message': 'Order not found'
+            'message': 'Order not found',
+            'debug_info': {
+                'order_id_searched': order_id,
+                'order_exists': False
+            }
         }, status=status.HTTP_404_NOT_FOUND)
     except Exception as e:
+        import traceback
         return Response({
             'success': False,
-            'message': str(e)
+            'message': str(e),
+            'debug_info': {
+                'error_type': type(e).__name__,
+                'error_message': str(e),
+                'traceback': traceback.format_exc()
+            }
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -970,6 +1048,13 @@ def assign_delivery_boy_to_order(request, order_id):
         # Get the delivery boy
         delivery_boy = get_object_or_404(DeliveryBoy, id=delivery_boy_id, is_active=True)
         
+        # Debug info for assignment validation
+        assignment_debug = {
+            'order_id': order.order_id,
+            'delivery_boy_id': delivery_boy.id,
+            'delivery_boy_name': delivery_boy.name,
+        }
+        
         # Validate that order location is within delivery boy's service radius
         if order.address and order.address.latitude and order.address.longitude:
             if delivery_boy.latitude and delivery_boy.longitude and delivery_boy.radius_km:
@@ -980,10 +1065,27 @@ def assign_delivery_boy_to_order(request, order_id):
                     order.address.longitude
                 )
                 
+                assignment_debug.update({
+                    'order_location': {
+                        'lat': float(order.address.latitude),
+                        'lon': float(order.address.longitude),
+                        'address': str(order.address)
+                    },
+                    'delivery_boy_base_location': {
+                        'lat': float(delivery_boy.latitude),
+                        'lon': float(delivery_boy.longitude),
+                        'place': delivery_boy.place
+                    },
+                    'calculated_distance_km': round(distance, 2),
+                    'service_radius_km': float(delivery_boy.radius_km),
+                    'is_within_radius': distance <= float(delivery_boy.radius_km)
+                })
+                
                 if distance > float(delivery_boy.radius_km):
                     return Response({
                         'success': False,
-                        'message': f'Order location is outside delivery boy\'s service radius. Distance: {round(distance, 2)}km, Service Radius: {float(delivery_boy.radius_km)}km'
+                        'message': f'Order location is outside delivery boy\'s service radius. Distance: {round(distance, 2)}km, Service Radius: {float(delivery_boy.radius_km)}km',
+                        'debug_info': assignment_debug
                     }, status=status.HTTP_400_BAD_REQUEST)
         
         # Check if order already has an active assignment
@@ -995,7 +1097,16 @@ def assign_delivery_boy_to_order(request, order_id):
         if existing_assignment:
             return Response({
                 'success': False,
-                'message': f'Order already assigned to {existing_assignment.delivery_boy.name}'
+                'message': f'Order already assigned to {existing_assignment.delivery_boy.name}',
+                'debug_info': {
+                    **assignment_debug,
+                    'existing_assignment': {
+                        'id': existing_assignment.id,
+                        'delivery_boy': existing_assignment.delivery_boy.name,
+                        'status': existing_assignment.status,
+                        'assigned_at': str(existing_assignment.assigned_at)
+                    }
+                }
             }, status=status.HTTP_400_BAD_REQUEST)
         
         # Calculate delivery charge based on distance
@@ -1059,23 +1170,36 @@ def assign_delivery_boy_to_order(request, order_id):
                 'assigned_at': order_assign.assigned_at,
                 'status': order_assign.status,
                 'delivery_charge': float(order_assign.delivery_charge)
-            }
+            },
+            'debug_info': assignment_debug
         }, status=status.HTTP_201_CREATED)
         
     except Order.DoesNotExist:
         return Response({
             'success': False,
-            'message': 'Order not found'
+            'message': 'Order not found',
+            'debug_info': {
+                'order_id_searched': order_id
+            }
         }, status=status.HTTP_404_NOT_FOUND)
     except DeliveryBoy.DoesNotExist:
         return Response({
             'success': False,
-            'message': 'Delivery boy not found or inactive'
+            'message': 'Delivery boy not found or inactive',
+            'debug_info': {
+                'delivery_boy_id_searched': delivery_boy_id
+            }
         }, status=status.HTTP_404_NOT_FOUND)
     except Exception as e:
+        import traceback
         return Response({
             'success': False,
-            'message': str(e)
+            'message': str(e),
+            'debug_info': {
+                'error_type': type(e).__name__,
+                'error_message': str(e),
+                'traceback': traceback.format_exc()
+            }
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -1084,6 +1208,7 @@ def assign_delivery_boy_to_order(request, order_id):
 def get_order_delivery_boy(request, order_id):
     """
     Get the assigned delivery boy for a specific order.
+    Enhanced with debugging information.
     """
     try:
         order = get_object_or_404(Order, order_id=order_id)
@@ -1094,11 +1219,23 @@ def get_order_delivery_boy(request, order_id):
             status__in=['ASSIGNED', 'ACCEPTED', 'PICKED', 'ON_THE_WAY']
         ).first()
         
+        # Debug info
+        debug_info = {
+            'order_id': order.order_id,
+            'order_status': order.order_status,
+            'has_active_assignment': assignment is not None,
+            'total_assignments_for_order': OrderAssign.objects.filter(order=order).count(),
+            'all_assignment_statuses': list(
+                OrderAssign.objects.filter(order=order).values_list('status', flat=True)
+            )
+        }
+        
         if not assignment:
             return Response({
                 'success': True,
                 'delivery_boy': None,
-                'message': 'No delivery boy assigned to this order'
+                'message': 'No delivery boy assigned to this order',
+                'debug_info': debug_info
             }, status=status.HTTP_200_OK)
         
         delivery_boy = assignment.delivery_boy
@@ -1126,16 +1263,26 @@ def get_order_delivery_boy(request, order_id):
         
         return Response({
             'success': True,
-            'delivery_boy': delivery_boy_data
+            'delivery_boy': delivery_boy_data,
+            'debug_info': debug_info
         }, status=status.HTTP_200_OK)
         
     except Order.DoesNotExist:
         return Response({
             'success': False,
-            'message': 'Order not found'
+            'message': 'Order not found',
+            'debug_info': {
+                'order_id_searched': order_id
+            }
         }, status=status.HTTP_404_NOT_FOUND)
     except Exception as e:
+        import traceback
         return Response({
             'success': False,
-            'message': str(e)
+            'message': str(e),
+            'debug_info': {
+                'error_type': type(e).__name__,
+                'error_message': str(e),
+                'traceback': traceback.format_exc()
+            }
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
