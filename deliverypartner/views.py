@@ -845,15 +845,15 @@ def calculate_distance(lat1, lon1, lat2, lon2):
 @permission_classes([IsAuthenticated])
 def get_available_delivery_boys_for_order(request, order_id):
     """
-    Get list of available delivery boys within delivery radius of the order's address.
-    Default radius is 10km, can be customized via query parameter.
+    Get list of available delivery boys whose service radius covers the order's address.
+    Filters delivery boys based on:
+    1. Distance from their base location to order address <= their service radius
+    2. Active status
+    3. Valid coordinates
     """
     try:
         # Get the order
         order = get_object_or_404(Order, order_id=order_id)
-        
-        # Get delivery radius from query params (default: 10km)
-        delivery_radius = float(request.GET.get('radius', 10))
         
         # Get the order's address
         if not order.address:
@@ -875,21 +875,30 @@ def get_available_delivery_boys_for_order(request, order_id):
         all_delivery_boys = DeliveryBoy.objects.filter(
             is_active=True,
             latitude__isnull=False,
-            longitude__isnull=False
+            longitude__isnull=False,
+            radius_km__isnull=False
         )
         
-        # Filter delivery boys within radius
+        # Filter delivery boys whose service radius covers the order location
         available_boys = []
         for boy in all_delivery_boys:
+            # Calculate distance from delivery boy's base location to order location
             distance = calculate_distance(
-                order_address.latitude,
-                order_address.longitude,
-                boy.latitude,
-                boy.longitude
+                boy.latitude,  # Delivery boy's base location
+                boy.longitude,
+                order_address.latitude,  # Order location
+                order_address.longitude
             )
             
-            # If within radius, add to list
-            if distance <= delivery_radius:
+            # Check if order location is within delivery boy's service radius
+            service_radius = float(boy.radius_km)
+            if distance <= service_radius:
+                # Check if delivery boy is currently available
+                is_currently_available = not OrderAssign.objects.filter(
+                    delivery_boy=boy,
+                    status__in=['ASSIGNED', 'ACCEPTED', 'PICKED', 'ON_THE_WAY']
+                ).exists()
+                
                 boy_data = {
                     'id': boy.id,
                     'name': boy.name,
@@ -899,18 +908,16 @@ def get_available_delivery_boys_for_order(request, order_id):
                     'vehicle_type': boy.vehicle_type,
                     'vehicle_number': boy.vehicle_number,
                     'place': boy.place,
-                    'current_latitude': float(boy.latitude) if boy.latitude else None,
-                    'current_longitude': float(boy.longitude) if boy.longitude else None,
-                    'distance_km': round(distance, 2),
-                    'is_available': not OrderAssign.objects.filter(
-                        delivery_boy=boy,
-                        status__in=['ASSIGNED', 'ACCEPTED', 'PICKED', 'ON_THE_WAY']
-                    ).exists()
+                    'base_latitude': float(boy.latitude),
+                    'base_longitude': float(boy.longitude),
+                    'service_radius_km': service_radius,
+                    'distance_from_base_to_order_km': round(distance, 2),
+                    'is_available': is_currently_available
                 }
                 available_boys.append(boy_data)
         
         # Sort by distance (closest first)
-        available_boys.sort(key=lambda x: x['distance_km'])
+        available_boys.sort(key=lambda x: x['distance_from_base_to_order_km'])
         
         return Response({
             'success': True,
@@ -920,8 +927,7 @@ def get_available_delivery_boys_for_order(request, order_id):
                 'latitude': float(order_address.latitude),
                 'longitude': float(order_address.longitude),
                 'address': str(order_address)
-            },
-            'search_radius_km': delivery_radius
+            }
         }, status=status.HTTP_200_OK)
         
     except Order.DoesNotExist:
@@ -941,6 +947,7 @@ def get_available_delivery_boys_for_order(request, order_id):
 def assign_delivery_boy_to_order(request, order_id):
     """
     Assign a delivery boy to an order.
+    Validates that the order location is within the delivery boy's service radius.
     Expected payload: {
         "delivery_boy_id": <int>,
         "message": <string> (optional)
@@ -963,6 +970,22 @@ def assign_delivery_boy_to_order(request, order_id):
         # Get the delivery boy
         delivery_boy = get_object_or_404(DeliveryBoy, id=delivery_boy_id, is_active=True)
         
+        # Validate that order location is within delivery boy's service radius
+        if order.address and order.address.latitude and order.address.longitude:
+            if delivery_boy.latitude and delivery_boy.longitude and delivery_boy.radius_km:
+                distance = calculate_distance(
+                    delivery_boy.latitude,
+                    delivery_boy.longitude,
+                    order.address.latitude,
+                    order.address.longitude
+                )
+                
+                if distance > float(delivery_boy.radius_km):
+                    return Response({
+                        'success': False,
+                        'message': f'Order location is outside delivery boy\'s service radius. Distance: {round(distance, 2)}km, Service Radius: {float(delivery_boy.radius_km)}km'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+        
         # Check if order already has an active assignment
         existing_assignment = OrderAssign.objects.filter(
             order=order,
@@ -975,19 +998,18 @@ def assign_delivery_boy_to_order(request, order_id):
                 'message': f'Order already assigned to {existing_assignment.delivery_boy.name}'
             }, status=status.HTTP_400_BAD_REQUEST)
         
-        # Calculate delivery charge (you can customize this logic)
-        delivery_charge = Decimal('50.00')  # Default charge
+        # Calculate delivery charge based on distance
+        delivery_charge = Decimal('50.00')  # Base charge
         
-        # If address has coordinates, calculate distance-based charge
         if order.address and order.address.latitude and order.address.longitude:
             if delivery_boy.latitude and delivery_boy.longitude:
                 distance = calculate_distance(
-                    order.address.latitude,
-                    order.address.longitude,
                     delivery_boy.latitude,
-                    delivery_boy.longitude
+                    delivery_boy.longitude,
+                    order.address.latitude,
+                    order.address.longitude
                 )
-                # Example: ₹50 base + ₹10 per km
+                # Base ₹50 + ₹10 per km
                 delivery_charge = Decimal('50.00') + (Decimal(str(distance)) * Decimal('10.00'))
         
         # Create order assignment
@@ -1022,8 +1044,9 @@ def assign_delivery_boy_to_order(request, order_id):
             'vehicle_type': delivery_boy.vehicle_type,
             'vehicle_number': delivery_boy.vehicle_number,
             'place': delivery_boy.place,
-            'current_latitude': float(delivery_boy.latitude) if delivery_boy.latitude else None,
-            'current_longitude': float(delivery_boy.longitude) if delivery_boy.longitude else None,
+            'base_latitude': float(delivery_boy.latitude) if delivery_boy.latitude else None,
+            'base_longitude': float(delivery_boy.longitude) if delivery_boy.longitude else None,
+            'service_radius_km': float(delivery_boy.radius_km) if delivery_boy.radius_km else None,
             'is_available': False  # Now assigned
         }
         
@@ -1089,8 +1112,9 @@ def get_order_delivery_boy(request, order_id):
             'vehicle_type': delivery_boy.vehicle_type,
             'vehicle_number': delivery_boy.vehicle_number,
             'place': delivery_boy.place,
-            'current_latitude': float(delivery_boy.latitude) if delivery_boy.latitude else None,
-            'current_longitude': float(delivery_boy.longitude) if delivery_boy.longitude else None,
+            'base_latitude': float(delivery_boy.latitude) if delivery_boy.latitude else None,
+            'base_longitude': float(delivery_boy.longitude) if delivery_boy.longitude else None,
+            'service_radius_km': float(delivery_boy.radius_km) if delivery_boy.radius_km else None,
             'is_available': False,
             'assignment': {
                 'id': assignment.id,

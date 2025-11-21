@@ -26,15 +26,15 @@ class DeliveryBoy(models.Model):
     is_active = models.BooleanField(default=True)
     aadhar_card_image = models.ImageField(upload_to='delivery_boys/aadhar_cards/', blank=True, null=True)
     driving_license_image = models.ImageField(upload_to='delivery_boys/driving_licenses/', blank=True, null=True)
-    otp = models.CharField(max_length=6, blank=True, null=True)  # <-- ADD THIS
-    otp_expiration = models.DateTimeField(blank=True, null=True)  # <-- AND THIS
+    otp = models.CharField(max_length=6, blank=True, null=True)
+    otp_expiration = models.DateTimeField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     latitude = models.DecimalField(max_digits=20, decimal_places=10, null=True, blank=True)
     longitude = models.DecimalField(max_digits=20, decimal_places=10, null=True, blank=True)
     place = models.CharField(max_length=300)
+    radius_km = models.DecimalField(max_digits=5, decimal_places=2, default=10.00, help_text="Service radius in kilometers")
     fcm_token = models.CharField(max_length=255, blank=True, null=True)
-
 
     def __str__(self):
         return self.name

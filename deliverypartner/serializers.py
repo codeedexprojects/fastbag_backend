@@ -5,7 +5,6 @@ from .models import DeliveryCharges
 from groceryproducts.models import GroceryProducts
 from fashion.models import Clothing
 
-
 class DeliveryBoySerializer(serializers.ModelSerializer):
     class Meta:
         model = DeliveryBoy
@@ -27,13 +26,20 @@ class DeliveryBoySerializer(serializers.ModelSerializer):
             'updated_at',
             'longitude',
             'latitude',
-            'place'
+            'place',
+            'radius_km'
         ]
 
     def validate_mobile_number(self, value):
-        # Add any custom validation for mobile number here
         if len(value) < 10:
             raise serializers.ValidationError("Mobile number must be at least 10 digits.")
+        return value
+
+    def validate_radius_km(self, value):
+        if value < 0:
+            raise serializers.ValidationError("Radius cannot be negative.")
+        if value > 100:
+            raise serializers.ValidationError("Radius cannot exceed 100 km.")
         return value
 
 # class OTPLoginSerializer(serializers.Serializer):
