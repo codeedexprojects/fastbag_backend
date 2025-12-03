@@ -1108,58 +1108,98 @@ class OrderFilter(filters.FilterSet):
 class AllorderviewAdmin(APIView):
     permission_classes = [IsAdminUser]
     pagination_class = OrderPagination
-    
+
     def get(self, request):
-        # Get all orders in LIFO order (newest first)
+        # Start with newest first
         orders = Order.objects.all().select_related('user').order_by('-created_at')
-        
-        # Apply filters if provided
+
+        # --- 1) status filter (case-insensitive)
         order_status = request.query_params.get('order_status')
         if order_status and order_status.lower() != 'all':
             orders = orders.filter(order_status__iexact=order_status)
-        
-        # Date filtering
-        start_date = request.query_params.get('start_date')
-        end_date = request.query_params.get('end_date')
-        if start_date:
-            orders = orders.filter(created_at__gte=start_date)
-        if end_date:
-            orders = orders.filter(created_at__lte=end_date)
-        
-        # Search filtering
+
+        # --- 2) date filtering: parse dates (expecting YYYY-MM-DD or similar)
+        # Use parse_date which accepts 'YYYY-MM-DD' and returns a date object or None.
+        start_date_str = request.query_params.get('start_date')
+        end_date_str = request.query_params.get('end_date')
+
+        if start_date_str:
+            parsed = parse_date(start_date_str)
+            if parsed:
+                # start of day, make timezone-aware
+                start_dt = timezone.make_aware(
+                    datetime.datetime.combine(parsed, datetime.time.min),
+                    timezone.get_current_timezone()
+                )
+                orders = orders.filter(created_at__gte=start_dt)
+
+        if end_date_str:
+            parsed = parse_date(end_date_str)
+            if parsed:
+                # include entire end day: end of day
+                end_dt = timezone.make_aware(
+                    datetime.datetime.combine(parsed, datetime.time.max),
+                    timezone.get_current_timezone()
+                )
+                orders = orders.filter(created_at__lte=end_dt)
+
+        # --- 3) search over several likely fields (order_id, user fields, payment, contact)
         search = request.query_params.get('search')
         if search:
-            orders = orders.filter(
-                Q(order_id__icontains=search) |
-                Q(user__name__icontains=search) |
-                Q(payment_method__icontains=search)
-            )
-        
-        # Get total count before pagination
+            search = search.strip()
+            if search:
+                orders = orders.filter(
+                    Q(order_id__icontains=search) |
+                    Q(user__name__icontains=search) |
+                    Q(user__username__icontains=search) |
+                    Q(user__email__icontains=search) |
+                    Q(payment_method__icontains=search) |
+                    Q(contact_number__icontains=search)
+                )
+
+        # Save total count before pagination for serial number calculation
         total_count = orders.count()
-        
-        # Apply pagination
+
+        # --- 4) pagination
         paginator = self.pagination_class()
-        page = paginator.paginate_queryset(orders, request)
-        
+        # DRF paginate_queryset usually takes (queryset, request, view=...)
+        page = paginator.paginate_queryset(orders, request, view=self)
+
         if page is not None:
-            # Calculate serial numbers for this page
-            page_number = paginator.page.number
-            page_size = paginator.page_size
+            # Determine page number robustly (use paginator's page_query_param if available)
+            page_param_name = getattr(paginator, 'page_query_param', 'page')
+            try:
+                page_number = int(request.query_params.get(page_param_name, 1))
+                if page_number < 1:
+                    page_number = 1
+            except (ValueError, TypeError):
+                page_number = 1
+
+            # Determine page_size robustly
+            # Prefer paginator.get_page_size(request) when available else fallback to paginator.page_size or default 10
+            page_size = None
+            try:
+                page_size = paginator.get_page_size(request)  # may return None
+            except Exception:
+                page_size = None
+
+            if not page_size:
+                page_size = getattr(paginator, 'page_size', None) or 10
+
+            # Starting serial number for this page (LIFO numbering)
             start_index = total_count - ((page_number - 1) * page_size)
-            
-            # Serialize the data
+
+            # Serialize page
             serializer = OrderSerializer(page, many=True, context={'request': request})
-            
-            # Add serial numbers to each order
             data_with_serial = []
             for i, item in enumerate(serializer.data):
+                # serial decreases from start_index
                 item['serial_number'] = start_index - i
                 data_with_serial.append(item)
-            
+
             return paginator.get_paginated_response(data_with_serial)
-        
-        # Fallback without pagination (should not normally happen)
+
+        # Fallback: no pagination used -> return all
         serializer = OrderSerializer(orders, many=True, context={'request': request})
         return Response(serializer.data)
 
