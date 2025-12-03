@@ -307,6 +307,7 @@ class OrderAssignStatusUpdateSerializer(serializers.ModelSerializer):
         model = OrderAssign
         fields = ['status']
 
+from django.db import models
 
 class DeliveryChargesSerializer(serializers.ModelSerializer):
     class Meta:
