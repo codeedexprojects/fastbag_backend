@@ -34,6 +34,12 @@ from django.utils import timezone
 from deliverypartner.models import OrderAssign
 from .utils import send_order_placed_notification, send_new_order_notification
 
+
+# at the top of your file
+import datetime as dt
+from django.db.models import Q
+
+
 import logging
 
 logger = logging.getLogger(__name__)
@@ -1105,6 +1111,8 @@ class OrderFilter(filters.FilterSet):
         )
 
 
+
+
 class AllorderviewAdmin(APIView):
     permission_classes = [IsAdminUser]
     pagination_class = OrderPagination
@@ -1113,22 +1121,21 @@ class AllorderviewAdmin(APIView):
         # Start with newest first
         orders = Order.objects.all().select_related('user').order_by('-created_at')
 
-        # --- 1) status filter (case-insensitive)
+        # Status filter (case-insensitive)
         order_status = request.query_params.get('order_status')
         if order_status and order_status.lower() != 'all':
             orders = orders.filter(order_status__iexact=order_status)
 
-        # --- 2) date filtering: parse dates (expecting YYYY-MM-DD or similar)
-        # Use parse_date which accepts 'YYYY-MM-DD' and returns a date object or None.
+        # Date filtering: parse YYYY-MM-DD and convert to timezone-aware datetimes
         start_date_str = request.query_params.get('start_date')
         end_date_str = request.query_params.get('end_date')
 
         if start_date_str:
-            parsed = parse_date(start_date_str)
+            parsed = parse_date(start_date_str)  # returns a date object or None
             if parsed:
-                # start of day, make timezone-aware
+                # Create aware datetime at start of day
                 start_dt = timezone.make_aware(
-                    datetime.datetime.combine(parsed, datetime.time.min),
+                    dt.datetime.combine(parsed, dt.time.min),
                     timezone.get_current_timezone()
                 )
                 orders = orders.filter(created_at__gte=start_dt)
@@ -1136,14 +1143,14 @@ class AllorderviewAdmin(APIView):
         if end_date_str:
             parsed = parse_date(end_date_str)
             if parsed:
-                # include entire end day: end of day
+                # Include entire end day by using time.max
                 end_dt = timezone.make_aware(
-                    datetime.datetime.combine(parsed, datetime.time.max),
+                    dt.datetime.combine(parsed, dt.time.max),
                     timezone.get_current_timezone()
                 )
                 orders = orders.filter(created_at__lte=end_dt)
 
-        # --- 3) search over several likely fields (order_id, user fields, payment, contact)
+        # Flexible search across likely fields
         search = request.query_params.get('search')
         if search:
             search = search.strip()
@@ -1157,16 +1164,15 @@ class AllorderviewAdmin(APIView):
                     Q(contact_number__icontains=search)
                 )
 
-        # Save total count before pagination for serial number calculation
+        # Total count before pagination for LIFO serials
         total_count = orders.count()
 
-        # --- 4) pagination
+        # Pagination
         paginator = self.pagination_class()
-        # DRF paginate_queryset usually takes (queryset, request, view=...)
         page = paginator.paginate_queryset(orders, request, view=self)
 
         if page is not None:
-            # Determine page number robustly (use paginator's page_query_param if available)
+            # Robustly get page number (fall back to 1)
             page_param_name = getattr(paginator, 'page_query_param', 'page')
             try:
                 page_number = int(request.query_params.get(page_param_name, 1))
@@ -1175,31 +1181,26 @@ class AllorderviewAdmin(APIView):
             except (ValueError, TypeError):
                 page_number = 1
 
-            # Determine page_size robustly
-            # Prefer paginator.get_page_size(request) when available else fallback to paginator.page_size or default 10
+            # Determine page size
             page_size = None
             try:
-                page_size = paginator.get_page_size(request)  # may return None
+                page_size = paginator.get_page_size(request)
             except Exception:
                 page_size = None
-
             if not page_size:
                 page_size = getattr(paginator, 'page_size', None) or 10
 
-            # Starting serial number for this page (LIFO numbering)
             start_index = total_count - ((page_number - 1) * page_size)
-
-            # Serialize page
             serializer = OrderSerializer(page, many=True, context={'request': request})
+
             data_with_serial = []
             for i, item in enumerate(serializer.data):
-                # serial decreases from start_index
                 item['serial_number'] = start_index - i
                 data_with_serial.append(item)
 
             return paginator.get_paginated_response(data_with_serial)
 
-        # Fallback: no pagination used -> return all
+        # Fallback (no pagination)
         serializer = OrderSerializer(orders, many=True, context={'request': request})
         return Response(serializer.data)
 
