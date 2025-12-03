@@ -520,8 +520,8 @@ class DeliveryChargesAPIView(APIView):
                 'data': serializer.data
             }, status=status.HTTP_200_OK)
         else:
-            # Get all delivery charges
-            delivery_charges = DeliveryCharges.objects.all()
+            # Get all delivery charges, ordered by distance_from
+            delivery_charges = DeliveryCharges.objects.all().order_by('distance_from')
             
             # Optional filtering by active status
             is_active = request.query_params.get('is_active', None)

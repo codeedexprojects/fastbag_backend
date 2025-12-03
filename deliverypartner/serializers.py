@@ -329,19 +329,60 @@ class DeliveryChargesSerializer(serializers.ModelSerializer):
         distance_from = data.get('distance_from')
         distance_to = data.get('distance_to')
         
+        # Check if distance_to is greater than distance_from
         if distance_to and distance_from and distance_to <= distance_from:
             raise serializers.ValidationError(
                 "'distance_to' must be greater than 'distance_from'"
             )
         
+        # Check for overlapping ranges
+        instance_id = self.instance.id if self.instance else None
+        
+        # Query for overlapping ranges
+        overlapping_charges = DeliveryCharges.objects.filter(
+            models.Q(
+                # Case 1: New range starts within existing range
+                distance_from__lte=distance_from,
+                distance_to__gt=distance_from
+            ) | models.Q(
+                # Case 2: New range ends within existing range
+                distance_from__lt=distance_to,
+                distance_to__gte=distance_to
+            ) | models.Q(
+                # Case 3: New range completely contains existing range
+                distance_from__gte=distance_from,
+                distance_to__lte=distance_to
+            )
+        )
+        
+        # Exclude the current instance when updating
+        if instance_id:
+            overlapping_charges = overlapping_charges.exclude(id=instance_id)
+        
+        if overlapping_charges.exists():
+            overlapping = overlapping_charges.first()
+            raise serializers.ValidationError({
+                'distance_range': f'Distance range {distance_from}-{distance_to} km overlaps with existing range {overlapping.distance_from}-{overlapping.distance_to} km'
+            })
+        
         return data
+    
+    def validate_distance_from(self, value):
+        if value < 0:
+            raise serializers.ValidationError("Distance from must be non-negative")
+        return value
+    
+    def validate_distance_to(self, value):
+        if value <= 0:
+            raise serializers.ValidationError("Distance to must be positive")
+        return value
     
     def validate_day_charge(self, value):
         if value < 0:
-            raise serializers.ValidationError("Day charge must be positive")
+            raise serializers.ValidationError("Day charge must be non-negative")
         return value
     
     def validate_night_charge(self, value):
         if value < 0:
-            raise serializers.ValidationError("Night charge must be positive")
+            raise serializers.ValidationError("Night charge must be non-negative")
         return value
